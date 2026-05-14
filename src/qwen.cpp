@@ -192,31 +192,32 @@ void qt_init_default_params(struct qt_init_params * p) {
 }
 
 void qt_tts_default_params(struct qt_tts_params * p) {
-    p->abi_version           = QT_ABI_VERSION;
-    p->text                  = nullptr;
-    p->lang                  = nullptr;
-    p->instruct              = nullptr;
-    p->speaker               = nullptr;
-    p->ref_audio_24k         = nullptr;
-    p->ref_n_samples         = 0;
-    p->ref_text              = nullptr;
-    p->seed                  = -1;
-    p->max_new_tokens        = 2048;
-    p->do_sample             = true;
-    p->temperature           = 0.9f;
-    p->top_k                 = 50;
-    p->top_p                 = 1.0f;
-    p->repetition_penalty    = 1.05f;
-    p->subtalker_do_sample   = true;
-    p->subtalker_temperature = 0.9f;
-    p->subtalker_top_k       = 50;
-    p->subtalker_top_p       = 1.0f;
-    p->dump_dir              = nullptr;
-    p->cancel                = nullptr;
-    p->cancel_user_data      = nullptr;
-    p->on_chunk              = nullptr;
-    p->on_chunk_user_data    = nullptr;
-    p->chunk_duration_sec    = 1.0f;
+    p->abi_version            = QT_ABI_VERSION;
+    p->text                   = nullptr;
+    p->lang                   = nullptr;
+    p->instruct               = nullptr;
+    p->speaker                = nullptr;
+    p->ref_audio_24k          = nullptr;
+    p->ref_n_samples          = 0;
+    p->ref_text               = nullptr;
+    p->seed                   = -1;
+    p->max_new_tokens         = 2048;
+    p->do_sample              = true;
+    p->temperature            = 0.9f;
+    p->top_k                  = 50;
+    p->top_p                  = 1.0f;
+    p->repetition_penalty     = 1.05f;
+    p->subtalker_do_sample    = true;
+    p->subtalker_temperature  = 0.9f;
+    p->subtalker_top_k        = 50;
+    p->subtalker_top_p        = 1.0f;
+    p->dump_dir               = nullptr;
+    p->cancel                 = nullptr;
+    p->cancel_user_data       = nullptr;
+    p->on_chunk               = nullptr;
+    p->on_chunk_user_data     = nullptr;
+    p->codec_chunk_sec        = 24.0f;
+    p->codec_left_context_sec = 2.0f;
 }
 
 struct qt_context * qt_init(const struct qt_init_params * params) {

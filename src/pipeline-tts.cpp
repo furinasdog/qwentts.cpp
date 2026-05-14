@@ -7,6 +7,7 @@
 #include "audio-io.h"
 #include "bpe.h"
 #include "code-predictor-forward.h"
+#include "codec-chunked-decode.h"
 #include "debug.h"
 #include "ggml.h"
 #include "pipeline-codec.h"
@@ -429,13 +430,18 @@ qt_status pipeline_tts_synthesize(PipelineTTS *                pt,
     const float subtk_T       = params->subtalker_do_sample ? params->subtalker_temperature : 0.0f;
     const float talker_rp     = params->repetition_penalty;
 
-    // Streaming config: when on_chunk is set, decode the codec every
-    // chunk_frames AR frames and emit through the callback. The buffered
-    // path keeps every code, decodes once at the very end and copies the
-    // resulting audio into out. chunk_frames <= 0 falls back to 1 second.
-    const bool  streaming    = (params->on_chunk != NULL);
-    const float chunk_sec    = params->chunk_duration_sec > 0.0f ? params->chunk_duration_sec : 1.0f;
-    const int   chunk_frames = pipeline_tts_duration_sec_to_tokens(pt, chunk_sec);
+    // Codec decode framing. Both the streaming path and the buffered
+    // path route through codec_chunked_decode, with a rolling left
+    // context window that mirrors the upstream Qwen3-TTS 12 Hz tokenizer
+    // chunked_decode rule : every chunk re uses up to left_ctx_frames
+    // previously decoded frames as left context, then the matching audio
+    // samples are stripped from the head of the decoded chunk. The first
+    // chunk has its left context collapsed to whatever is available.
+    const bool  streaming       = (params->on_chunk != NULL);
+    const float chunk_sec       = params->codec_chunk_sec > 0.0f ? params->codec_chunk_sec : 24.0f;
+    const float left_ctx_sec    = params->codec_left_context_sec >= 0.0f ? params->codec_left_context_sec : 2.0f;
+    const int   chunk_frames    = pipeline_tts_duration_sec_to_tokens(pt, chunk_sec);
+    const int   left_ctx_frames = pipeline_tts_duration_sec_to_tokens(pt, left_ctx_sec);
 
     std::vector<std::vector<int32_t>> all_codes;
     all_codes.reserve((size_t) params->max_new_tokens);
@@ -450,36 +456,14 @@ qt_status pipeline_tts_synthesize(PipelineTTS *                pt,
 
     std::vector<float> next_emb((size_t) hidden, 0.0f);
 
-    // Streaming bookkeeping: pending_codes accumulates frames since the
-    // last emit; emit_pending decodes them through the codec and feeds
-    // on_chunk. Returns false to abort with QT_STATUS_CANCELLED.
-    std::vector<std::vector<int32_t>> pending_codes;
-    pending_codes.reserve((size_t) chunk_frames);
-
-    auto emit_pending = [&]() -> bool {
-        if (pending_codes.empty()) {
-            return true;
-        }
-        const int            T_frames = (int) pending_codes.size();
-        std::vector<int32_t> codes_kt((size_t) num_codebooks * (size_t) T_frames);
-        for (int t = 0; t < T_frames; t++) {
-            for (int k = 0; k < num_codebooks; k++) {
-                codes_kt[(size_t) k * (size_t) T_frames + (size_t) t] = pending_codes[(size_t) t][(size_t) k];
-            }
-        }
-        std::vector<float> chunk_audio = pipeline_codec_decode(&pt->codec, codes_kt.data(), num_codebooks, T_frames);
-        if (chunk_audio.empty()) {
-            qt_set_error("pipeline_tts_synthesize: streaming codec decode returned no audio");
-            qt_log(QT_LOG_ERROR, "[Pipeline] streaming codec decode returned no audio");
-            return false;
-        }
-        if (!params->on_chunk(chunk_audio.data(), (int) chunk_audio.size(), params->on_chunk_user_data)) {
-            qt_log(QT_LOG_INFO, "[Pipeline] on_chunk callback aborted the synthesis");
-            return false;
-        }
-        pending_codes.clear();
-        return true;
-    };
+    // Streaming rolling decoder. Holds the K major codes buffer, the
+    // emit cursor and the left context window. push_frame triggers an
+    // emit as soon as chunk_frames new frames have accumulated since
+    // the previous emit boundary ; flush drains the tail at EOS.
+    codec_chunked_decoder_stream stream;
+    if (streaming) {
+        stream.init(num_codebooks, chunk_frames, left_ctx_frames);
+    }
 
     for (int step = 0; step < params->max_new_tokens; step++) {
         // Cooperative cancellation, polled at every step. Granularity is
@@ -555,11 +539,14 @@ qt_status pipeline_tts_synthesize(PipelineTTS *                pt,
         all_codes.push_back(cp.codes);
         talker_history.push_back(c0);
         if (streaming) {
-            pending_codes.push_back(cp.codes);
-            if ((int) pending_codes.size() >= chunk_frames) {
-                if (!emit_pending()) {
+            if (!stream.push_frame(&pt->codec, cp.codes.data(), params->on_chunk, params->on_chunk_user_data)) {
+                if (stream.cancelled) {
+                    qt_log(QT_LOG_INFO, "[Pipeline] on_chunk callback aborted the synthesis");
                     return QT_STATUS_CANCELLED;
                 }
+                qt_set_error("pipeline_tts_synthesize: streaming codec decode failed at frame %d", step);
+                qt_log(QT_LOG_ERROR, "[Pipeline] streaming codec decode failed at frame %d", step);
+                return QT_STATUS_GENERATE_FAILED;
             }
         }
 
@@ -628,8 +615,14 @@ qt_status pipeline_tts_synthesize(PipelineTTS *                pt,
     // buffered output stays empty in this branch; the caller already
     // received every sample through on_chunk.
     if (streaming) {
-        if (!emit_pending()) {
-            return QT_STATUS_CANCELLED;
+        if (!stream.flush(&pt->codec, params->on_chunk, params->on_chunk_user_data)) {
+            if (stream.cancelled) {
+                qt_log(QT_LOG_INFO, "[Pipeline] on_chunk callback aborted the synthesis on tail flush");
+                return QT_STATUS_CANCELLED;
+            }
+            qt_set_error("pipeline_tts_synthesize: streaming codec decode failed on tail flush");
+            qt_log(QT_LOG_ERROR, "[Pipeline] streaming codec decode failed on tail flush");
+            return QT_STATUS_GENERATE_FAILED;
         }
         out->samples     = NULL;
         out->n_samples   = 0;
@@ -649,9 +642,12 @@ qt_status pipeline_tts_synthesize(PipelineTTS *                pt,
         return QT_STATUS_OK;
     }
 
-    // Codec decode: transpose codes from [T_frames, K] to [K, T_frames]
-    // because pipeline_codec_decode expects K-major layout (codebooks
-    // first, frames second), then materialise the 24 kHz mono audio.
+    // Buffered codec decode through the chunked path : same framing as
+    // the streaming branch (chunk_frames + left_ctx_frames), bit perfect
+    // equivalent to a single pipeline_codec_decode call when T_frames
+    // fits in one chunk, bounded VRAM beyond that. Transpose codes from
+    // [T_frames, K] to [K, T_frames] because codec_chunked_decode
+    // expects K major layout.
     const int            T_frames = (int) all_codes.size();
     std::vector<int32_t> codes_kt((size_t) num_codebooks * (size_t) T_frames);
     for (int t = 0; t < T_frames; t++) {
@@ -659,7 +655,8 @@ qt_status pipeline_tts_synthesize(PipelineTTS *                pt,
             codes_kt[(size_t) k * (size_t) T_frames + (size_t) t] = all_codes[(size_t) t][(size_t) k];
         }
     }
-    std::vector<float> audio = pipeline_codec_decode(&pt->codec, codes_kt.data(), num_codebooks, T_frames);
+    std::vector<float> audio =
+        codec_chunked_decode(&pt->codec, codes_kt.data(), num_codebooks, T_frames, chunk_frames, left_ctx_frames);
     if (audio.empty()) {
         qt_set_error("pipeline_tts_synthesize: codec decode returned no audio");
         qt_log(QT_LOG_ERROR, "[Pipeline] codec decode returned no audio");

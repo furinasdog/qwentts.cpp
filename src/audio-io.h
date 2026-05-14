@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #if defined(_WIN32)
 #    include <fcntl.h>
@@ -332,44 +333,144 @@ static std::string audio_encode_wav(const float * audio, int T_audio, int sr, Wa
     return {};
 }
 
-// Write mono float audio to WAV file in the requested format. path "-"
-// streams the encoded WAV to stdout (pipe friendly). S16/S24 hard clip
-// to [-1, +1], F32 preserves the full range.
+// Write mono float audio to WAV file in the requested format.
+// S16/S24 hard clip to [-1, +1], F32 preserves the full range.
 static bool audio_write_wav(const char * path, const float * audio, int T_audio, int sr, WavFormat fmt = WAV_S16) {
     std::string wav = audio_encode_wav(audio, T_audio, sr, fmt);
     if (wav.empty()) {
         return false;
     }
 
-    const bool to_stdout = (path[0] == '-' && path[1] == '\0');
-    FILE *     fp        = to_stdout ? stdout : utf8_fopen(path, "wb");
+    FILE * fp = utf8_fopen(path, "wb");
     if (!fp) {
         fprintf(stderr, "[WAV] Cannot open %s for writing\n", path);
         return false;
     }
-#if defined(_WIN32)
-    // stdout defaults to text mode on Windows; binary mode is mandatory
-    // for WAV bytes to survive without CRLF translation. The mode is set
-    // once per process and is harmless on the second call.
-    if (to_stdout) {
-        _setmode(_fileno(stdout), _O_BINARY);
-    }
-#endif
     if (fwrite(wav.data(), 1, wav.size(), fp) != wav.size()) {
         fprintf(stderr, "[WAV] Failed to write %s\n", path);
-        if (!to_stdout) {
-            fclose(fp);
-        }
+        fclose(fp);
         return false;
     }
-    if (to_stdout) {
-        fflush(fp);
-    } else {
-        fclose(fp);
-    }
+    fclose(fp);
 
     const char * fmt_name = (fmt == WAV_S16) ? "S16" : (fmt == WAV_S24) ? "S24" : "F32";
-    fprintf(stderr, "[WAV] Wrote %s: %d samples, %d Hz, mono %s\n", to_stdout ? "<stdout>" : path, T_audio, sr,
-            fmt_name);
+    fprintf(stderr, "[WAV] Wrote %s: %d samples, %d Hz, mono %s\n", path, T_audio, sr, fmt_name);
     return true;
+}
+
+// Minimal streaming WAV sink. Writes a wide RIFF / data size at open and
+// never updates them: the stream is one shot, non seekable, suitable for
+// stdout pipes where the player reads until EOF. Use audio_write_wav for
+// seekable file output (the file there has accurate sizes in headers).
+struct wav_stream {
+    FILE *    fp;
+    WavFormat fmt;
+    int       sr;
+};
+
+// Open a streaming WAV sink on stdout. Switches stdout to binary mode on
+// Windows. Header advertises 0x7FFFFFFF for both RIFF chunk size and data
+// chunk size, the conventional "unknown / live" marker that aplay, ffmpeg
+// and most players accept by reading until EOF.
+static bool wav_stream_open_stdout(wav_stream * ws, int sr, WavFormat fmt) {
+    ws->fp  = stdout;
+    ws->fmt = fmt;
+    ws->sr  = sr;
+
+#if defined(_WIN32)
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
+
+    int      bits             = (fmt == WAV_S16) ? 16 : (fmt == WAV_S24) ? 24 : 32;
+    uint16_t fmt_tag          = (fmt == WAV_F32) ? 3 : 1;
+    int      n_channels       = 1;
+    uint32_t bytes_per_sample = (uint32_t) bits / 8;
+    uint32_t byte_rate        = (uint32_t) sr * (uint32_t) n_channels * bytes_per_sample;
+    uint16_t block_align      = (uint16_t) (n_channels * (int) bytes_per_sample);
+    uint32_t data_size        = 0x7FFFFFFFu;
+    uint32_t file_size        = 0x7FFFFFFFu;
+
+    char   header[44];
+    char * p = header;
+
+    memcpy(p, "RIFF", 4);
+    p += 4;
+    wav_write_u32le(p, file_size);
+    memcpy(p, "WAVE", 4);
+    p += 4;
+
+    memcpy(p, "fmt ", 4);
+    p += 4;
+    wav_write_u32le(p, 16);
+    wav_write_u16le(p, fmt_tag);
+    wav_write_u16le(p, (uint16_t) n_channels);
+    wav_write_u32le(p, (uint32_t) sr);
+    wav_write_u32le(p, byte_rate);
+    wav_write_u16le(p, block_align);
+    wav_write_u16le(p, (uint16_t) bits);
+
+    memcpy(p, "data", 4);
+    p += 4;
+    wav_write_u32le(p, data_size);
+
+    if (fwrite(header, 1, 44, ws->fp) != 44) {
+        fprintf(stderr, "[WAV-Stream] header write failed\n");
+        return false;
+    }
+    fflush(ws->fp);
+
+    const char * fmt_name = (fmt == WAV_S16) ? "S16" : (fmt == WAV_S24) ? "S24" : "F32";
+    fprintf(stderr, "[WAV-Stream] stdout: %d Hz, mono %s\n", sr, fmt_name);
+    return true;
+}
+
+// Encode and write n mono samples to the streaming sink. NaN and Inf coerce
+// to zero. S16 / S24 clamp to [-1, +1] before quantisation. Flushes after
+// every write so a downstream pipe sees the bytes immediately.
+static bool wav_stream_write(wav_stream * ws, const float * audio, int n) {
+    if (n <= 0) {
+        return true;
+    }
+
+    if (ws->fmt == WAV_S16) {
+        std::vector<uint8_t> out((size_t) n * 2);
+        char *               p = (char *) out.data();
+        for (int t = 0; t < n; t++) {
+            int16_t s = (int16_t) (wav_clamp1(wav_sanitize(audio[t])) * 32767.0f);
+            wav_write_u16le(p, (uint16_t) s);
+        }
+        if (fwrite(out.data(), 1, out.size(), ws->fp) != out.size()) {
+            return false;
+        }
+    } else if (ws->fmt == WAV_S24) {
+        std::vector<uint8_t> out((size_t) n * 3);
+        char *               p = (char *) out.data();
+        for (int t = 0; t < n; t++) {
+            int32_t s = (int32_t) (wav_clamp1(wav_sanitize(audio[t])) * 8388607.0f);
+            wav_write_u24le(p, (uint32_t) s);
+        }
+        if (fwrite(out.data(), 1, out.size(), ws->fp) != out.size()) {
+            return false;
+        }
+    } else {
+        std::vector<uint8_t> out((size_t) n * 4);
+        char *               p = (char *) out.data();
+        for (int t = 0; t < n; t++) {
+            float    f = wav_sanitize(audio[t]);
+            uint32_t u;
+            memcpy(&u, &f, 4);
+            wav_write_u32le(p, u);
+        }
+        if (fwrite(out.data(), 1, out.size(), ws->fp) != out.size()) {
+            return false;
+        }
+    }
+
+    fflush(ws->fp);
+    return true;
+}
+
+// Final flush. The sink does not own the stdout FILE so no fclose is issued.
+static void wav_stream_close(wav_stream * ws) {
+    fflush(ws->fp);
 }

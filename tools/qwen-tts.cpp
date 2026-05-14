@@ -60,6 +60,16 @@ static void print_usage(const char * prog) {
             "Backend options:\n"
             "  --no-fa                 Disable flash attention (manual F32 attention chain)\n"
             "  --clamp-fp16            Clamp hidden states + V to FP16 range (sub Ampere CUDA)\n\n"
+            "Codec decode framing:\n"
+            "  --codec-chunk-sec <f>          Decode chunk size in seconds (default: 24.0,\n"
+            "                                 = 300 frames at 12.5 Hz, matches the upstream\n"
+            "                                 Qwen3-TTS 12 Hz tokenizer chunked_decode).\n"
+            "                                 Lower values reduce streaming latency at the\n"
+            "                                 cost of more frequent codec passes.\n"
+            "  --codec-left-context-sec <f>   Left context window in seconds (default: 2.0,\n"
+            "                                 = 25 frames at 12.5 Hz, upstream default).\n"
+            "                                 Re uses previously decoded frames to remove\n"
+            "                                 edge artefacts at chunk boundaries.\n\n"
             "Debug:\n"
             "  --dump <dir>            Dump intermediate tensors for cossim debug\n",
             prog);
@@ -90,6 +100,8 @@ struct Args {
     bool         subtalker_do_sample;
     bool         use_fa;
     bool         clamp_fp16;
+    float        codec_chunk_sec;
+    float        codec_left_context_sec;
 };
 
 // Read all of stdin into a string. Trims trailing newlines so a piped
@@ -133,22 +145,24 @@ static bool read_text_file(const char * path, std::string & out) {
 }
 
 static bool parse_args(int argc, char ** argv, Args & a) {
-    a                       = {};
-    a.lang                  = "english";
-    a.format                = "wav16";
-    a.max_new_tokens        = 2048;
-    a.seed                  = -1;
-    a.do_sample             = true;
-    a.temperature           = 0.9f;
-    a.top_k                 = 50;
-    a.top_p                 = 1.0f;
-    a.repetition_penalty    = 1.05f;
-    a.subtalker_do_sample   = true;
-    a.subtalker_top_k       = 50;
-    a.subtalker_top_p       = 1.0f;
-    a.subtalker_temperature = 0.9f;
-    a.use_fa                = true;
-    a.clamp_fp16            = false;
+    a                        = {};
+    a.lang                   = "english";
+    a.format                 = "wav16";
+    a.max_new_tokens         = 2048;
+    a.seed                   = -1;
+    a.do_sample              = true;
+    a.temperature            = 0.9f;
+    a.top_k                  = 50;
+    a.top_p                  = 1.0f;
+    a.repetition_penalty     = 1.05f;
+    a.subtalker_do_sample    = true;
+    a.subtalker_top_k        = 50;
+    a.subtalker_top_p        = 1.0f;
+    a.subtalker_temperature  = 0.9f;
+    a.use_fa                 = true;
+    a.clamp_fp16             = false;
+    a.codec_chunk_sec        = 24.0f;
+    a.codec_left_context_sec = 2.0f;
     for (int i = 1; i < argc; i++) {
         const char * arg = argv[i];
         if (std::strcmp(arg, "-h") == 0 || std::strcmp(arg, "--help") == 0) {
@@ -204,6 +218,10 @@ static bool parse_args(int argc, char ** argv, Args & a) {
             a.use_fa = false;
         } else if (std::strcmp(arg, "--clamp-fp16") == 0) {
             a.clamp_fp16 = true;
+        } else if (std::strcmp(arg, "--codec-chunk-sec") == 0 && i + 1 < argc) {
+            a.codec_chunk_sec = (float) std::atof(argv[++i]);
+        } else if (std::strcmp(arg, "--codec-left-context-sec") == 0 && i + 1 < argc) {
+            a.codec_left_context_sec = (float) std::atof(argv[++i]);
         } else if (std::strcmp(arg, "-o") == 0 && i + 1 < argc) {
             a.out_wav = argv[++i];
         } else {
@@ -299,25 +317,61 @@ static int run(const Args & a) {
     // verbatim and resolved by qt_synthesize via std::random_device.
     qt_tts_params params;
     qt_tts_default_params(&params);
-    params.text                  = text;
-    params.lang                  = a.lang;
-    params.instruct              = a.instruct;
-    params.speaker               = a.speaker;
-    params.ref_audio_24k         = ref_audio_24k;
-    params.ref_n_samples         = ref_n_samples;
-    params.ref_text              = ref_text;
-    params.seed                  = a.seed;
-    params.max_new_tokens        = a.max_new_tokens;
-    params.do_sample             = a.do_sample;
-    params.temperature           = a.temperature;
-    params.top_k                 = a.top_k;
-    params.top_p                 = a.top_p;
-    params.repetition_penalty    = a.repetition_penalty;
-    params.subtalker_do_sample   = a.subtalker_do_sample;
-    params.subtalker_temperature = a.subtalker_temperature;
-    params.subtalker_top_k       = a.subtalker_top_k;
-    params.subtalker_top_p       = a.subtalker_top_p;
-    params.dump_dir              = a.dump_dir;
+    params.text                   = text;
+    params.lang                   = a.lang;
+    params.instruct               = a.instruct;
+    params.speaker                = a.speaker;
+    params.ref_audio_24k          = ref_audio_24k;
+    params.ref_n_samples          = ref_n_samples;
+    params.ref_text               = ref_text;
+    params.seed                   = a.seed;
+    params.max_new_tokens         = a.max_new_tokens;
+    params.do_sample              = a.do_sample;
+    params.temperature            = a.temperature;
+    params.top_k                  = a.top_k;
+    params.top_p                  = a.top_p;
+    params.repetition_penalty     = a.repetition_penalty;
+    params.subtalker_do_sample    = a.subtalker_do_sample;
+    params.subtalker_temperature  = a.subtalker_temperature;
+    params.subtalker_top_k        = a.subtalker_top_k;
+    params.subtalker_top_p        = a.subtalker_top_p;
+    params.dump_dir               = a.dump_dir;
+    params.codec_chunk_sec        = a.codec_chunk_sec;
+    params.codec_left_context_sec = a.codec_left_context_sec;
+
+    // Streaming detection : -o '-' writes a wide RIFF header to stdout
+    // up front and pipes encoded samples chunk by chunk through the
+    // on_chunk callback as the AR loop produces frames. Any other path
+    // (or no -o) takes the buffered route so the file gets accurate
+    // sizes in its header.
+    const char * out_path         = a.out_wav ? a.out_wav : "out.wav";
+    const bool   stream_to_stdout = (out_path[0] == '-' && out_path[1] == '\0');
+
+    if (stream_to_stdout) {
+        wav_stream ws = {};
+        if (!wav_stream_open_stdout(&ws, 24000, wav_fmt)) {
+            qt_free(q);
+            return 1;
+        }
+        params.on_chunk = [](const float * s, int n, void * ud) -> bool {
+            return wav_stream_write((wav_stream *) ud, s, n);
+        };
+        params.on_chunk_user_data = &ws;
+
+        qt_audio  audio  = {};
+        qt_status status = qt_synthesize(q, &params, &audio);
+        wav_stream_close(&ws);
+        if (status != QT_STATUS_OK) {
+            fprintf(stderr, "[CLI] ERROR: %s\n", qt_last_error());
+            qt_audio_free(&audio);
+            qt_free(q);
+            return 1;
+        }
+        qt_audio_free(&audio);
+        qt_free(q);
+        fprintf(stderr, "[Pipeline] Streamed to <stdout>\n");
+        return 0;
+    }
 
     qt_audio  audio  = {};
     qt_status status = qt_synthesize(q, &params, &audio);
@@ -329,7 +383,6 @@ static int run(const Args & a) {
     }
 
     if (audio.n_samples > 0) {
-        const char * out_path = a.out_wav ? a.out_wav : "out.wav";
         if (!audio_write_wav(out_path, audio.samples, audio.n_samples, audio.sample_rate, wav_fmt)) {
             fprintf(stderr, "[Pipeline] FATAL: WAV write failed for %s\n", out_path);
             qt_audio_free(&audio);

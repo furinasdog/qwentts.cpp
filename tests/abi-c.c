@@ -68,8 +68,9 @@ int main(void) {
     qt_tts_default_params(&params);
 
     /* Sanity-check a few default values, including the abi_version and
-     * the new use_fa / clamp_fp16 / on_chunk / chunk_duration_sec slots. */
-    if (params.max_new_tokens != 2048 || params.chunk_duration_sec <= 0.0f) {
+     * the new use_fa / clamp_fp16 / on_chunk / codec_chunk_sec /
+     * codec_left_context_sec slots. */
+    if (params.max_new_tokens != 2048 || params.codec_chunk_sec <= 0.0f || params.codec_left_context_sec < 0.0f) {
         fprintf(stderr, "[Probe] default values do not match\n");
         return 1;
     }

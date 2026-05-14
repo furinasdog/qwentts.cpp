@@ -248,18 +248,32 @@ struct qt_tts_params {
     // Streaming output. When on_chunk is non NULL, qt_synthesize runs
     // the streaming pipeline: audio chunks emit through on_chunk and
     // `out` stays empty on success. on_chunk NULL keeps the buffered
-    // path. chunk_duration_sec drives the chunk size at codec sample
-    // rate; values <= 0 fall back to 1.0 second. The last chunk on
-    // EOS or max_new flushes whatever frames remain.
+    // path. The last chunk on EOS or max_new flushes whatever frames
+    // remain.
     qt_audio_chunk_cb on_chunk;
     void *            on_chunk_user_data;
-    float             chunk_duration_sec;
+
+    // Codec decode framing. Applied to both the streaming path (chunk
+    // by chunk emission) and the buffered path (one shot decode at the
+    // end) : the chunked decode rolls a left context window across the
+    // codec frames to avoid edge artefacts at chunk boundaries. The
+    // first chunk has its left context collapsed to whatever is
+    // available, matching the upstream Qwen3-TTS 12 Hz tokenizer
+    // chunked_decode rule. Defaults match the upstream reference :
+    // codec_chunk_sec 24.0 (300 frames at 12.5 Hz) and
+    // codec_left_context_sec 2.0 (25 frames at 12.5 Hz). Values are
+    // converted internally to integer frame counts via the codec frame
+    // rate ; codec_chunk_sec clamps to >= 1 frame, codec_left_context_sec
+    // clamps to >= 0 frames.
+    float codec_chunk_sec;
+    float codec_left_context_sec;
 };
 
 // Initialise to the standard defaults. Strings NULL, seed -1,
 // max_new_tokens 2048, do_sample true, temperature 0.9, top_k 50,
 // top_p 1.0, repetition_penalty 1.05, subtalker mirrors talker,
-// dump_dir NULL, cancel NULL, on_chunk NULL, chunk_duration_sec 1.0.
+// dump_dir NULL, cancel NULL, on_chunk NULL, codec_chunk_sec 24.0,
+// codec_left_context_sec 2.0.
 QT_API void qt_tts_default_params(struct qt_tts_params * p);
 
 // Run the full TTS synthesis. Validates the params against the loaded
