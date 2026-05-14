@@ -328,17 +328,17 @@ enum qwen_status qwen_synthesize(struct qwen_context *          q,
         return QWEN_STATUS_MODE_INVALID;
     }
     if (params->ref_audio_24k && mt != "base") {
-        qt_set_error("--ref-audio is only valid for base models (loaded: %s)", mt.c_str());
+        qt_set_error("--ref-wav is only valid for base models (loaded: %s)", mt.c_str());
         qwen_audio_free(out);
         return QWEN_STATUS_MODE_INVALID;
     }
     if (params->speaker && params->ref_audio_24k) {
-        qt_set_error("--speaker and --ref-audio are mutually exclusive");
+        qt_set_error("--speaker and --ref-wav are mutually exclusive");
         qwen_audio_free(out);
         return QWEN_STATUS_INVALID_PARAMS;
     }
     if (params->ref_text && !params->ref_audio_24k) {
-        qt_set_error("--ref-text requires --ref-audio");
+        qt_set_error("--ref-text requires --ref-wav");
         qwen_audio_free(out);
         return QWEN_STATUS_INVALID_PARAMS;
     }

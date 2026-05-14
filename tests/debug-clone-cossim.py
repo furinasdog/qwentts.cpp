@@ -15,7 +15,7 @@ Cote Python the speaker embedding is captured directly via
 model.extract_speaker_embedding, and the reference codec frames via
 model.speech_tokenizer.encode. Both intermediates land as speaker-emb.bin
 and ref-codes.bin and are compared against the C++ side dumps emitted
-by pipeline-tts.cpp when --ref-audio and --ref-text are set.
+by pipeline-tts.cpp when --ref-wav and --ref-text are set.
 
 Dumps land in cpp/clone/ (C++) and python/clone/ (Python).
 """
@@ -271,10 +271,10 @@ def dump_mel_mag_python(ref_wav, dump_dir):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--prompt",         default="../examples/prompt.txt")
-    ap.add_argument("--ref-audio",      default=DEFAULT_REF_AUDIO,
+    ap.add_argument("--ref-wav",      default=DEFAULT_REF_AUDIO,
                     help="reference WAV path for voice cloning")
     ap.add_argument("--ref-text-file",  default=DEFAULT_REF_TEXT,
-                    help="path to a UTF-8 file with the transcript of ref-audio")
+                    help="path to a UTF-8 file with the transcript of ref-wav")
     ap.add_argument("--seed",           type=int, default=42)
     ap.add_argument("--lang",           default="english")
     ap.add_argument("--quant",          default="F32",
@@ -300,7 +300,7 @@ def main():
     with open(args.ref_text_file, "r", encoding="utf-8") as f:
         ref_text = f.read().strip()
     print(f"[Input] Prompt: {len(text)} chars: {text[:60]}{'...' if len(text) > 60 else ''}")
-    print(f"[Input] RefAudio: {args.ref_audio}")
+    print(f"[Input] RefAudio: {args.ref_wav}")
     print(f"[Input] RefText: {len(ref_text)} chars: {ref_text[:60]}{'...' if len(ref_text) > 60 else ''}")
     print(f"[Input] Lang: {args.lang} Seed: {args.seed} MaxNewTokens: {args.max_new_tokens}")
     print(f"[Input] Mode: greedy ICL")
@@ -328,7 +328,7 @@ def main():
 
     # Load reference WAV. Resample to 24 kHz if needed since both the speaker
     # encoder and the codec tokenizer expect 24 kHz mono input.
-    ref_wav, ref_sr = sf.read(args.ref_audio, always_2d=False)
+    ref_wav, ref_sr = sf.read(args.ref_wav, always_2d=False)
     if ref_wav.ndim > 1:
         ref_wav = ref_wav[:, 0]
     ref_wav = ref_wav.astype(np.float32)
@@ -459,7 +459,7 @@ def main():
         "--codec",     model_cdc,
         "--seed",      str(args.seed),
         "--text",      text,
-        "--ref-audio", args.ref_audio,
+        "--ref-wav", args.ref_wav,
         "--ref-text",  ref_text,
         "--lang",      args.lang,
         "--max-new",   str(args.max_new_tokens),
@@ -467,7 +467,7 @@ def main():
         "-o",          args.out_cpp,
         "--greedy",
     ]
-    print(f"[GGML] Cmd: {' '.join(cmd[:6])} --text [...] --ref-audio {args.ref_audio} --ref-text [...] --lang {args.lang} --max-new {args.max_new_tokens} --dump {DUMP_CPP} -o {args.out_cpp} --greedy")
+    print(f"[GGML] Cmd: {' '.join(cmd[:6])} --text [...] --ref-wav {args.ref_wav} --ref-text [...] --lang {args.lang} --max-new {args.max_new_tokens} --dump {DUMP_CPP} -o {args.out_cpp} --greedy")
     r = subprocess.run(cmd)
     if r.returncode != 0:
         sys.exit(r.returncode)

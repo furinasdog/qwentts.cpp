@@ -24,7 +24,7 @@
 #include <string>
 
 // Tokenizer sample rate for the 12 Hz Qwen3-TTS codec : 24 kHz. Used
-// by audio_read_mono to resample the optional --ref-audio file before
+// by audio_read_mono to resample the optional --ref-wav file before
 // handing it to the facade. The output sample rate is reported by
 // qwen_audio.sample_rate after a successful synthesis.
 static const int QWEN_TTS_SAMPLE_RATE = 24000;
@@ -44,12 +44,12 @@ static void print_usage(const char * prog) {
             "  --instruct <s>          Style instruction. Required for VoiceDesign, optional\n"
             "                          for CustomVoice. Rejected for Base.\n"
             "  --speaker <name>        Speaker name. Only valid for CustomVoice.\n"
-            "  --ref-audio <wav>       Reference WAV path for voice clone (Base only). Mutually\n"
+            "  --ref-wav <wav>       Reference WAV path for voice clone (Base only). Mutually\n"
             "                          exclusive with --speaker. Mode A (x_vector_only) extracts\n"
             "                          a speaker embedding via the ECAPA-TDNN encoder.\n"
             "  --ref-text <path>       Path to a UTF-8 text file containing the reference\n"
             "                          transcript for voice clone ICL mode (Base only, requires\n"
-            "                          --ref-audio). Switches the prompt to ICL mode B where the\n"
+            "                          --ref-wav). Switches the prompt to ICL mode B where the\n"
             "                          talker conditions on the reference codec codes.\n"
             "  --max-new <n>           Max new audio frames (default: 2048)\n"
             "  --format <fmt>          WAV output format: wav16, wav24, wav32 (default: wav16)\n\n"
@@ -75,7 +75,7 @@ struct Args {
     const char * lang;
     const char * instruct;
     const char * speaker;
-    const char * ref_audio;
+    const char * ref_wav;
     const char * ref_text_path;
     const char * dump_dir;
     const char * out_wav;
@@ -165,8 +165,8 @@ static bool parse_args(int argc, char ** argv, Args & a) {
             a.instruct = argv[++i];
         } else if (std::strcmp(arg, "--speaker") == 0 && i + 1 < argc) {
             a.speaker = argv[++i];
-        } else if (std::strcmp(arg, "--ref-audio") == 0 && i + 1 < argc) {
-            a.ref_audio = argv[++i];
+        } else if (std::strcmp(arg, "--ref-wav") == 0 && i + 1 < argc) {
+            a.ref_wav = argv[++i];
         } else if (std::strcmp(arg, "--ref-text") == 0 && i + 1 < argc) {
             a.ref_text_path = argv[++i];
         } else if (std::strcmp(arg, "--format") == 0 && i + 1 < argc) {
@@ -249,11 +249,11 @@ static int run(const Args & a) {
     std::unique_ptr<float, void (*)(void *)> raw_holder(NULL, std::free);
     const float *                            ref_audio_24k = NULL;
     int                                      ref_n_samples = 0;
-    if (a.ref_audio) {
+    if (a.ref_wav) {
         int     T_in = 0;
-        float * raw  = audio_read_mono(a.ref_audio, QWEN_TTS_SAMPLE_RATE, &T_in);
+        float * raw  = audio_read_mono(a.ref_wav, QWEN_TTS_SAMPLE_RATE, &T_in);
         if (!raw || T_in <= 0) {
-            fprintf(stderr, "[CLI] ERROR: cannot read --ref-audio '%s'\n", a.ref_audio);
+            fprintf(stderr, "[CLI] ERROR: cannot read --ref-wav '%s'\n", a.ref_wav);
             if (raw) {
                 std::free(raw);
             }

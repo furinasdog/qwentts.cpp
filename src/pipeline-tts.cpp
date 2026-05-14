@@ -288,8 +288,7 @@ bool pipeline_tts_synthesize(PipelineTTS *                       pt,
     const float *      ref_spk_emb_ptr = NULL;
     if (has_ref_audio) {
         if (!pt->has_speaker_encoder) {
-            fprintf(stderr,
-                    "[Pipeline] FATAL: --ref-audio requires a model with a loaded speaker encoder (Base only)\n");
+            fprintf(stderr, "[Pipeline] FATAL: --ref-wav requires a model with a loaded speaker encoder (Base only)\n");
             return false;
         }
         if (!speaker_encoder_extract(&pt->speaker_encoder, pt->sched, params.ref_audio_24k, params.ref_n_samples,
@@ -313,13 +312,13 @@ bool pipeline_tts_synthesize(PipelineTTS *                       pt,
     int                  ref_codes_T = 0;
     if (!ref_text.empty()) {
         if (!has_ref_audio) {
-            fprintf(stderr, "[Pipeline] FATAL: --ref-text requires --ref-audio\n");
+            fprintf(stderr, "[Pipeline] FATAL: --ref-text requires --ref-wav\n");
             return false;
         }
         // The codec hop is 1920 samples at 24 kHz so n_samples must be
         // a multiple of 1920. Truncate to the nearest hop boundary.
         if (params.ref_n_samples < QWEN_TOKENIZER_HOP_LENGTH) {
-            fprintf(stderr, "[Pipeline] FATAL: ref_audio too short for ICL (%d samples)\n", params.ref_n_samples);
+            fprintf(stderr, "[Pipeline] FATAL: ref_wav too short for ICL (%d samples)\n", params.ref_n_samples);
             return false;
         }
         int aligned_T = (params.ref_n_samples / QWEN_TOKENIZER_HOP_LENGTH) * QWEN_TOKENIZER_HOP_LENGTH;
@@ -347,7 +346,7 @@ bool pipeline_tts_synthesize(PipelineTTS *                       pt,
         debug_dump_2d(&d, "trailing-text-hidden", prompt.trailing_text_hidden.data(), prompt.T_trailing, prompt.hidden);
         debug_dump_1d(&d, "tts-pad-embed", prompt.tts_pad_embed.data(), prompt.hidden);
 
-        // Voice clone dumps : speaker-emb fires when ref_audio is set
+        // Voice clone dumps : speaker-emb fires when ref_wav is set
         // (modes A and B), ref-codes fires only when ref_text is also set
         // (mode B ICL). Both are no-ops in base / tts / customvoice modes,
         // the dump files simply do not appear in those runs.

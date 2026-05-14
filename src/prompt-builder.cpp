@@ -215,7 +215,7 @@ bool prompt_builder_build(const PipelineTTS *   pt,
     // Mode B requires ref_spk_emb so the speaker slot is also filled.
     const bool icl = !ref_text.empty() && ref_codes != NULL && ref_codes_T > 0;
     if (icl && ref_spk_emb == NULL) {
-        fprintf(stderr, "[Prompt] FATAL: ICL mode requires ref_spk_emb (no --ref-audio?)\n");
+        fprintf(stderr, "[Prompt] FATAL: ICL mode requires ref_spk_emb (no --ref-wav?)\n");
         return false;
     }
 
