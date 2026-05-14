@@ -139,8 +139,8 @@ static inline void philox_randn(int64_t seed, float * out, int n, bool bf16_roun
 // PyTorch CUDA torch.rand kernels.
 //
 // Required by the multinomial sampler used during stochastic
-// generation : torch.multinomial(probs, 1) decomposes mathematically
-// as u ~ Uniform[0, 1) ; cdf = cumsum(probs) ; argmin{ i : cdf[i] >= u }.
+// generation: torch.multinomial(probs, 1) decomposes mathematically
+// as u ~ Uniform[0, 1); cdf = cumsum(probs); argmin{ i: cdf[i] >= u }.
 // To stay byte-exact with the upstream Python pipeline, both sides
 // must consume the same u from the same Philox state, hence we need a
 // uniform draw, not a Box-Muller normal.

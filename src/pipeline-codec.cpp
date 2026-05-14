@@ -387,7 +387,7 @@ std::vector<int32_t> pipeline_codec_encode(PipelineCodec * pc,
     if (dump) {
         DebugDumper d;
         debug_init(&d, dump);
-        // Raw audio input dump : the SEANet sees this, and any divergence
+        // Raw audio input dump: the SEANet sees this, and any divergence
         // in the resampler (torchaudio reimpl C++ vs librosa Python) shows
         // up here as a phase or amplitude drift.
         debug_dump_1d(&d, "audio-input", audio, n_samples);

@@ -43,7 +43,7 @@ struct qwen_context {
 };
 
 // Thread-local backing store for qt_last_error(). std::string sized once
-// per thread, grows on demand, never freed across calls : the std runtime
+// per thread, grows on demand, never freed across calls: the std runtime
 // reclaims it on thread exit. An empty string means "no error recorded
 // on this thread yet", which qt_last_error() exposes as "".
 static thread_local std::string g_last_error;
@@ -53,14 +53,14 @@ void qt_set_error_v(const char * fmt, va_list ap) {
         g_last_error.clear();
         return;
     }
-    // Two-pass vsnprintf : first call sizes the buffer, second writes the
+    // Two-pass vsnprintf: first call sizes the buffer, second writes the
     // message. va_copy keeps the original ap valid for the second pass.
     va_list ap2;
     va_copy(ap2, ap);
     int needed = std::vsnprintf(nullptr, 0, fmt, ap2);
     va_end(ap2);
     if (needed < 0) {
-        g_last_error = "qt_set_error : vsnprintf failed";
+        g_last_error = "qt_set_error: vsnprintf failed";
         return;
     }
     g_last_error.resize(static_cast<size_t>(needed));
@@ -96,7 +96,7 @@ void qt_throw(const char * fmt, ...) {
 }
 
 // Process-wide log callback. Atomic so qwen_log_set can replace it without
-// locking : write happens with memory_order_release, every reader sees a
+// locking: write happens with memory_order_release, every reader sees a
 // fully published callback pointer paired with its user_data slot.
 // std::atomic on a function pointer is lock-free on every platform we
 // target. user_data is a plain pointer because it is only ever published
@@ -206,20 +206,20 @@ void qwen_tts_default_params(struct qwen_tts_params * p) {
 
 struct qwen_context * qwen_init(const struct qwen_init_params * params) {
     if (!params || !params->talker_path || !params->codec_path) {
-        qt_set_error("qwen_init : params, talker_path or codec_path is NULL");
-        qt_log(QT_LOG_ERROR, "[qwen] qwen_init requires talker_path and codec_path");
+        qt_set_error("qwen_init: params, talker_path or codec_path is NULL");
+        qt_log(QT_LOG_ERROR, "[Qwen] qwen_init requires talker_path and codec_path");
         return nullptr;
     }
     if (params->abi_version > QWEN_ABI_VERSION) {
         qt_set_error(
-            "qwen_init : params->abi_version %d > QWEN_ABI_VERSION %d (binding compiled against a newer header)",
+            "qwen_init: params->abi_version %d > QWEN_ABI_VERSION %d (binding compiled against a newer header)",
             params->abi_version, QWEN_ABI_VERSION);
-        qt_log(QT_LOG_ERROR, "[qwen] qwen_init params struct is from a newer ABI (%d > %d)", params->abi_version,
+        qt_log(QT_LOG_ERROR, "[Qwen] qwen_init params struct is from a newer ABI (%d > %d)", params->abi_version,
                QWEN_ABI_VERSION);
         return nullptr;
     }
 
-    qt_log(QT_LOG_INFO, "[qwen] qwentts.cpp %s", qwen_version());
+    qt_log(QT_LOG_INFO, "[Qwen] qwentts.cpp %s", qwen_version());
 
     // new qwen_context() value-initialises every field: POD aggregates
     // (BackendPair, PipelineTTS) are zero-init, std containers in
@@ -228,17 +228,17 @@ struct qwen_context * qwen_init(const struct qwen_init_params * params) {
 
     // The load chain runs inside a try block. Any failure deep in the
     // GGUF reader, the codec load or the LM weight load throws via
-    // qt_throw ; the catch funnels every variant into one cleanup via
+    // qt_throw; the catch funnels every variant into one cleanup via
     // qwen_free, which is idempotent on partial state (NULL-safe sched,
     // NULL GGUF handles, refcount-correct backend release).
     try {
         q->bp = backend_init("Talker");
         if (!q->bp.backend) {
-            qt_throw("qwen_init : backend_init failed (no GGML backend available)");
+            qt_throw("qwen_init: backend_init failed (no GGML backend available)");
         }
 
         if (!pipeline_tts_load(&q->pt, params->talker_path, params->codec_path, q->bp)) {
-            qt_throw("qwen_init : pipeline_tts_load failed for '%s' / '%s'", params->talker_path, params->codec_path);
+            qt_throw("qwen_init: pipeline_tts_load failed for '%s' / '%s'", params->talker_path, params->codec_path);
         }
 
         // BPE tokenizer payload lives inside the talker GGUF. Load the
@@ -246,7 +246,7 @@ struct qwen_context * qwen_init(const struct qwen_init_params * params) {
         // specials key list mirrors what the standalone CLI used to
         // do before the facade hoisted the load chain.
         if (!load_bpe_from_gguf(&q->tok, params->talker_path)) {
-            qt_throw("qwen_init : load_bpe_from_gguf failed for '%s'", params->talker_path);
+            qt_throw("qwen_init: load_bpe_from_gguf failed for '%s'", params->talker_path);
         }
         const char * specials_keys[] = {
             "qwen3-tts.text.im_start_id", "qwen3-tts.text.im_end_id",  "qwen3-tts.text.tts_pad_id",
@@ -255,7 +255,7 @@ struct qwen_context * qwen_init(const struct qwen_init_params * params) {
         bpe_load_specials_from_keys(&q->tok, params->talker_path, specials_keys, 5);
     } catch (const std::exception & e) {
         qt_set_error("%s", e.what());
-        qt_log(QT_LOG_ERROR, "[qwen] %s", e.what());
+        qt_log(QT_LOG_ERROR, "[Qwen] %s", e.what());
         qwen_free(q);
         return nullptr;
     }
@@ -286,7 +286,7 @@ enum qwen_status qwen_synthesize(struct qwen_context *          q,
                                  const struct qwen_tts_params * params,
                                  struct qwen_audio *            out) {
     if (!q || !params || !out) {
-        qt_set_error("qwen_synthesize : q, params or out is NULL");
+        qt_set_error("qwen_synthesize: q, params or out is NULL");
         if (out) {
             qwen_audio_free(out);
         }
@@ -294,7 +294,7 @@ enum qwen_status qwen_synthesize(struct qwen_context *          q,
     }
     if (params->abi_version > QWEN_ABI_VERSION) {
         qt_set_error(
-            "qwen_synthesize : params->abi_version %d > QWEN_ABI_VERSION %d (binding compiled against a newer header)",
+            "qwen_synthesize: params->abi_version %d > QWEN_ABI_VERSION %d (binding compiled against a newer header)",
             params->abi_version, QWEN_ABI_VERSION);
         qwen_audio_free(out);
         return QWEN_STATUS_INVALID_PARAMS;
@@ -345,7 +345,7 @@ enum qwen_status qwen_synthesize(struct qwen_context *          q,
 
     // Translate the public POD params into the internal C++ struct
     // expected by pipeline_tts_synthesize. Borrowed pointers are
-    // forwarded verbatim ; the lifetime contract on the public side
+    // forwarded verbatim; the lifetime contract on the public side
     // (caller keeps strings alive for the duration of the call)
     // matches what the pipeline already requires.
     PipelineTTSSynthesizeParams p = {};
@@ -389,7 +389,7 @@ enum qwen_status qwen_synthesize(struct qwen_context *          q,
         const size_t bytes = n * sizeof(float);
         float *      buf   = (float *) std::malloc(bytes > 0 ? bytes : 1);
         if (!buf) {
-            qt_set_error("qwen_synthesize : malloc failed for %zu samples", n);
+            qt_set_error("qwen_synthesize: malloc failed for %zu samples", n);
             qwen_audio_free(out);
             return QWEN_STATUS_OOM;
         }
@@ -403,7 +403,7 @@ enum qwen_status qwen_synthesize(struct qwen_context *          q,
         return QWEN_STATUS_OK;
     } catch (const std::exception & e) {
         qt_set_error("%s", e.what());
-        qt_log(QT_LOG_ERROR, "[qwen] %s", e.what());
+        qt_log(QT_LOG_ERROR, "[Qwen] %s", e.what());
         qwen_audio_free(out);
         return QWEN_STATUS_GENERATE_FAILED;
     }

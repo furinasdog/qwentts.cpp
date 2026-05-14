@@ -2,7 +2,7 @@
 // audio-io.h: WAV read/write for qwentts.cpp.
 // Reads any WAV (PCM16 / PCM24 / float32, mono or stereo, any rate).
 // Writes mono WAV in S16, S24 or F32 at the source sample rate.
-// Internal pipelines : planar stereo float [L:T][R:T] for reads,
+// Internal pipelines: planar stereo float [L:T][R:T] for reads,
 // flat mono float [T] for writes (qwen output is mono only).
 
 #include <cmath>
@@ -11,6 +11,11 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+
+#if defined(_WIN32)
+#    include <fcntl.h>
+#    include <io.h>
+#endif
 
 // wav.h: WAV reader (returns interleaved, we deinterleave below)
 #include "wav.h"
@@ -323,7 +328,8 @@ static std::string audio_encode_wav(const float * audio, int T_audio, int sr, Wa
         case WAV_F32:
             return audio_encode_wav_f32(audio, T_audio, sr);
     }
-    return audio_encode_wav_s16(audio, T_audio, sr);
+    fprintf(stderr, "[WAV] unknown format %d\n", (int) fmt);
+    return {};
 }
 
 // Write mono float audio to WAV file in the requested format. path "-"
@@ -341,6 +347,14 @@ static bool audio_write_wav(const char * path, const float * audio, int T_audio,
         fprintf(stderr, "[WAV] Cannot open %s for writing\n", path);
         return false;
     }
+#if defined(_WIN32)
+    // stdout defaults to text mode on Windows; binary mode is mandatory
+    // for WAV bytes to survive without CRLF translation. The mode is set
+    // once per process and is harmless on the second call.
+    if (to_stdout) {
+        _setmode(_fileno(stdout), _O_BINARY);
+    }
+#endif
     if (fwrite(wav.data(), 1, wav.size(), fp) != wav.size()) {
         fprintf(stderr, "[WAV] Failed to write %s\n", path);
         if (!to_stdout) {

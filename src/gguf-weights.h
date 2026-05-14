@@ -14,6 +14,7 @@
 //   gf_close(&gf);   // safe after wctx_alloc copied data to GPU
 
 #include "gguf.h"
+#include "qt-error.h"
 #include "weight-ctx.h"
 
 #include <cstdio>
@@ -167,15 +168,13 @@ static struct ggml_tensor * gf_load_tensor(WeightCtx *         wctx,
                                            int                 n_dims_override = 0) {
     int64_t idx = gguf_find_tensor(gf.gguf, name.c_str());
     if (idx < 0) {
-        fprintf(stderr, "[GGUF] FATAL: tensor '%s' not found\n", name.c_str());
-        exit(1);
+        qt_throw("[GGUF] tensor '%s' not found", name.c_str());
     }
 
     // Get metadata from the context populated by gguf_init_from_file
     struct ggml_tensor * src = ggml_get_tensor(gf.meta, name.c_str());
     if (!src) {
-        fprintf(stderr, "[GGUF] FATAL: tensor '%s' not in meta context\n", name.c_str());
-        exit(1);
+        qt_throw("[GGUF] tensor '%s' not in meta context", name.c_str());
     }
 
     int     n_dims;
@@ -218,8 +217,7 @@ static struct ggml_tensor * gf_try_load_tensor(WeightCtx * wctx, const GGUFModel
 static struct ggml_tensor * gf_load_tensor_f32(WeightCtx * wctx, const GGUFModel & gf, const std::string & name) {
     int64_t idx = gguf_find_tensor(gf.gguf, name.c_str());
     if (idx < 0) {
-        fprintf(stderr, "[GGUF] FATAL: tensor '%s' not found\n", name.c_str());
-        exit(1);
+        qt_throw("[GGUF] tensor '%s' not found (f32 load)", name.c_str());
     }
     struct ggml_tensor * src    = ggml_get_tensor(gf.meta, name.c_str());
     int                  n_dims = ggml_n_dims(src);
@@ -270,7 +268,7 @@ static struct ggml_tensor * gf_load_tensor_f32(WeightCtx * wctx, const GGUFModel
 // Load a Conv1d / Conv1dDW kernel weight, forcing F16 storage on the
 // backend regardless of the source GGUF dtype.
 //
-// TODO upstream GGML : ggml_conv_1d and ggml_conv_1d_dw in
+// TODO upstream GGML: ggml_conv_1d and ggml_conv_1d_dw in
 // ggml/src/ggml.c hardcode dst_type = GGML_TYPE_F16 in their internal
 // ggml_im2col call (currently ggml.c lines around 4508 and 4542).
 // ggml_conv_2d at the equivalent site uses the adaptive pattern
@@ -296,8 +294,7 @@ static struct ggml_tensor * gf_load_tensor_f32(WeightCtx * wctx, const GGUFModel
 static struct ggml_tensor * gf_load_conv(WeightCtx * wctx, const GGUFModel & gf, const std::string & name) {
     int64_t idx = gguf_find_tensor(gf.gguf, name.c_str());
     if (idx < 0) {
-        fprintf(stderr, "[GGUF] FATAL: tensor '%s' not found\n", name.c_str());
-        exit(1);
+        qt_throw("[GGUF] tensor '%s' not found (conv load)", name.c_str());
     }
     struct ggml_tensor * src    = ggml_get_tensor(gf.meta, name.c_str());
     int                  n_dims = ggml_n_dims(src);
@@ -306,14 +303,12 @@ static struct ggml_tensor * gf_load_conv(WeightCtx * wctx, const GGUFModel & gf,
         ne[i] = src->ne[i];
     }
 
-    // F16 source : direct passthrough, no conversion.
+    // F16 source: direct passthrough, no conversion.
     if (src->type == GGML_TYPE_F16) {
         return gf_load_tensor(wctx, gf, name);
     }
     if (src->type != GGML_TYPE_F32 && src->type != GGML_TYPE_BF16) {
-        fprintf(stderr, "[GGUF] FATAL: gf_load_conv unsupported source type %s for '%s'\n", ggml_type_name(src->type),
-                name.c_str());
-        exit(1);
+        qt_throw("[GGUF] gf_load_conv unsupported source type %s for '%s'", ggml_type_name(src->type), name.c_str());
     }
 
     // Allocate F16 backend tensor in the WeightCtx graph.
@@ -336,7 +331,7 @@ static struct ggml_tensor * gf_load_conv(WeightCtx * wctx, const GGUFModel & gf,
     if (src->type == GGML_TYPE_F32) {
         ggml_fp32_to_fp16_row((const float *) raw, data, (int) n);
     } else {
-        // BF16 source : widen to F32 first, then narrow to F16 in
+        // BF16 source: widen to F32 first, then narrow to F16 in
         // one pass to preserve mantissa bits the BF16-to-F16 direct
         // cast would otherwise leave undefined.
         std::vector<float> f32(n);
@@ -370,8 +365,7 @@ static const void * gf_get_data(const GGUFModel & gf, const char * name) {
 static enum ggml_type gf_get_type(const GGUFModel & gf, const std::string & name) {
     struct ggml_tensor * src = ggml_get_tensor(gf.meta, name.c_str());
     if (!src) {
-        fprintf(stderr, "[GGUF] FATAL: tensor '%s' not in meta context\n", name.c_str());
-        exit(1);
+        qt_throw("[GGUF] tensor '%s' not in meta context", name.c_str());
     }
     return src->type;
 }
@@ -388,9 +382,7 @@ static struct ggml_tensor * gf_load_qkv_fused(WeightCtx *         wctx,
     struct ggml_tensor * k_src = ggml_get_tensor(gf.meta, k_name.c_str());
     struct ggml_tensor * v_src = ggml_get_tensor(gf.meta, v_name.c_str());
     if (!q_src || !k_src || !v_src) {
-        fprintf(stderr, "[GGUF] FATAL: QKV tensor not found: %s / %s / %s\n", q_name.c_str(), k_name.c_str(),
-                v_name.c_str());
-        exit(1);
+        qt_throw("[GGUF] QKV tensor not found: %s / %s / %s", q_name.c_str(), k_name.c_str(), v_name.c_str());
     }
     // All must share ne[0] (input dim) and type - otherwise can't fuse
     GGML_ASSERT(q_src->ne[0] == k_src->ne[0] && k_src->ne[0] == v_src->ne[0]);

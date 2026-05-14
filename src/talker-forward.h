@@ -1,5 +1,5 @@
 #pragma once
-// talker-forward.h : prefill + decode forwards of the Talker LM, KV
+// talker-forward.h: prefill + decode forwards of the Talker LM, KV
 // cached.
 //
 // Both entry points run the same 28-layer Qwen3 decoder stack with
@@ -8,13 +8,13 @@
 // and projected through codec_head to produce codebook 0 logits over a
 // 3072-entry vocab.
 //
-//   talker_forward_prefill : feeds a [T_ctx, hidden] input embedding,
+//   talker_forward_prefill: feeds a [T_ctx, hidden] input embedding,
 //   rewinds the KV cache to 0 and writes T_ctx positions into it. Used
 //   once per utterance at the start of generation, and re-runnable for
 //   bisect dumps. Optional dump_dir captures L0/7/14/21/27 hidden taps
 //   plus the final hidden and logits.
 //
-//   talker_forward_decode : feeds a single [1, hidden] embedding,
+//   talker_forward_decode: feeds a single [1, hidden] embedding,
 //   appends one position to the cache at index kv->cur_len, attends to
 //   the [0, cur_len+1) window. Called once per generated frame after
 //   the predictor has produced its 15 acoustic codes and the loop has
@@ -44,7 +44,7 @@ struct TalkerForwardOutput {
     int vocab;
 };
 
-// Prefill : reset the cache and write T_ctx positions in one shot.
+// Prefill: reset the cache and write T_ctx positions in one shot.
 // input_embed is [T, hidden] f32 row-major. dump_dir may be NULL.
 bool talker_forward_prefill(const TalkerWeights * tw,
                             KVCache *             kv,
@@ -54,7 +54,7 @@ bool talker_forward_prefill(const TalkerWeights * tw,
                             const char *          dump_dir,
                             TalkerForwardOutput * out);
 
-// Decode : feed exactly one embedding and append one position to the
+// Decode: feed exactly one embedding and append one position to the
 // cache. Reads positions [0, kv->cur_len + 1). Caller is responsible
 // for ensuring kv->cur_len + 1 <= kv->max_seq_len.
 bool talker_forward_decode(const TalkerWeights * tw,

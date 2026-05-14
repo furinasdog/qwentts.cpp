@@ -1,10 +1,10 @@
-// prompt-builder.cpp : CPU-side construction of the talker prefix
+// prompt-builder.cpp: CPU-side construction of the talker prefix
 // input embedding. Mirrors generate() in qwen_tts/core/models/modeling_qwen3_tts.py
 // for the strict subset {non-streaming, no voice clone}.
 //
 // Two streams are aligned then summed :
-//   text  stream :  text_projection(text_embedding(ids))   151936 -> 2048 -> 1024
-//   codec stream :  codec_embedding(ids)                   3072 -> 1024
+//   text  stream:  text_projection(text_embedding(ids))   151936 -> 2048 -> 1024
+//   codec stream:  codec_embedding(ids)                   3072 -> 1024
 //
 // Layout (lang_id != none, no speaker, no instruct) :
 //
@@ -31,6 +31,7 @@
 #include "prompt-builder.h"
 
 #include "ggml.h"
+#include "qt-error.h"
 
 #include <cmath>
 #include <cstdio>
@@ -46,24 +47,18 @@
 static void embed_row_to_f32(const GGUFModel & gf, const char * tensor_name, int row_id, int dim, float * dst) {
     struct ggml_tensor * src = ggml_get_tensor(gf.meta, tensor_name);
     if (!src) {
-        fprintf(stderr, "[Prompt] FATAL: tensor '%s' not in meta context\n", tensor_name);
-        std::exit(1);
+        qt_throw("[Prompt] tensor '%s' not in meta context", tensor_name);
     }
     if (src->ne[0] != dim) {
-        fprintf(stderr, "[Prompt] FATAL: tensor '%s' dim mismatch %lld vs %d\n", tensor_name, (long long) src->ne[0],
-                dim);
-        std::exit(1);
+        qt_throw("[Prompt] tensor '%s' dim mismatch %lld vs %d", tensor_name, (long long) src->ne[0], dim);
     }
     if (row_id < 0 || row_id >= (int) src->ne[1]) {
-        fprintf(stderr, "[Prompt] FATAL: row %d out of range for '%s' (vocab=%lld)\n", row_id, tensor_name,
-                (long long) src->ne[1]);
-        std::exit(1);
+        qt_throw("[Prompt] row %d out of range for '%s' (vocab=%lld)", row_id, tensor_name, (long long) src->ne[1]);
     }
 
     const uint8_t * base = (const uint8_t *) gf_get_data(gf, tensor_name);
     if (!base) {
-        fprintf(stderr, "[Prompt] FATAL: tensor '%s' has no data\n", tensor_name);
-        std::exit(1);
+        qt_throw("[Prompt] tensor '%s' has no data", tensor_name);
     }
 
     const size_t row_bytes = ggml_row_size(src->type, dim);
@@ -76,8 +71,7 @@ static void embed_row_to_f32(const GGUFModel & gf, const char * tensor_name, int
 
     const struct ggml_type_traits * tt = ggml_get_type_traits(src->type);
     if (!tt || !tt->to_float) {
-        fprintf(stderr, "[Prompt] FATAL: unsupported dtype %d for '%s'\n", (int) src->type, tensor_name);
-        std::exit(1);
+        qt_throw("[Prompt] unsupported dtype %d for '%s'", (int) src->type, tensor_name);
     }
     tt->to_float(row, dst, dim);
 }
@@ -88,8 +82,7 @@ static void embed_row_to_f32(const GGUFModel & gf, const char * tensor_name, int
 static void read_tensor_f32(const GGUFModel & gf, const char * tensor_name, std::vector<float> & dst) {
     struct ggml_tensor * src = ggml_get_tensor(gf.meta, tensor_name);
     if (!src) {
-        fprintf(stderr, "[Prompt] FATAL: tensor '%s' not in meta context\n", tensor_name);
-        std::exit(1);
+        qt_throw("[Prompt] tensor '%s' not in meta context", tensor_name);
     }
     int64_t         n    = ggml_nelements(src);
     const uint8_t * base = (const uint8_t *) gf_get_data(gf, tensor_name);
@@ -102,8 +95,7 @@ static void read_tensor_f32(const GGUFModel & gf, const char * tensor_name, std:
 
     const struct ggml_type_traits * tt = ggml_get_type_traits(src->type);
     if (!tt || !tt->to_float) {
-        fprintf(stderr, "[Prompt] FATAL: unsupported dtype %d for '%s'\n", (int) src->type, tensor_name);
-        std::exit(1);
+        qt_throw("[Prompt] unsupported dtype %d for '%s'", (int) src->type, tensor_name);
     }
     tt->to_float(base, dst.data(), (int64_t) n);
 }
@@ -127,7 +119,7 @@ static inline float silu(float v) {
     return v / (1.0f + std::exp(-v));
 }
 
-// Apply text_projection : F1 (text_hidden -> text_hidden) -> SiLU -> F2
+// Apply text_projection: F1 (text_hidden -> text_hidden) -> SiLU -> F2
 // (text_hidden -> hidden), both with bias.
 struct TextProjection {
     int                in_dim;   // text_hidden_size
@@ -185,7 +177,7 @@ static void embed_codec(const GGUFModel & gf, int id, int hidden_size, std::vect
     embed_row_to_f32(gf, "talker.codec_embd.weight", id, hidden_size, dst.data() + old);
 }
 
-// Vector add : a += b, length n.
+// Vector add: a += b, length n.
 static void vec_add(float * a, const float * b, int n) {
     for (int i = 0; i < n; i++) {
         a[i] += b[i];
@@ -211,7 +203,7 @@ bool prompt_builder_build(const PipelineTTS *   pt,
         return false;
     }
 
-    // Voice clone mode B : ref_text and ref_codes drive an ICL prefix.
+    // Voice clone mode B: ref_text and ref_codes drive an ICL prefix.
     // Mode B requires ref_spk_emb so the speaker slot is also filled.
     const bool icl = !ref_text.empty() && ref_codes != NULL && ref_codes_T > 0;
     if (icl && ref_spk_emb == NULL) {
@@ -220,7 +212,7 @@ bool prompt_builder_build(const PipelineTTS *   pt,
     }
 
     // Build the chat-templated prompt fed to the BPE tokenizer.
-    // Same wrap as the upstream demos : assistant role + utterance +
+    // Same wrap as the upstream demos: assistant role + utterance +
     // im_end + newline + assistant role.
     std::string full_text;
     full_text.reserve(utterance_text.size() + 64);
@@ -242,7 +234,7 @@ bool prompt_builder_build(const PipelineTTS *   pt,
         return false;
     }
 
-    // Resolve language : "auto" -> no language id, prefill is 3 codec
+    // Resolve language: "auto" -> no language id, prefill is 3 codec
     // tokens (nothink, think_bos, think_eos). Otherwise insert the
     // configured language id between think_bos and think_eos.
     int language_id = -1;
@@ -265,7 +257,7 @@ bool prompt_builder_build(const PipelineTTS *   pt,
         }
     }
 
-    // Resolve speaker : empty name -> no speaker. Otherwise lookup case
+    // Resolve speaker: empty name -> no speaker. Otherwise lookup case
     // insensitively in pt->speakers and override the language id with the
     // dialect entry when the user supplied language is chinese or auto,
     // mirroring modeling_qwen3_tts.py lines 2118 to 2122.
@@ -288,7 +280,7 @@ bool prompt_builder_build(const PipelineTTS *   pt,
         }
         speaker_id = found->id;
 
-        // Dialect override : applied only when the user supplied language
+        // Dialect override: applied only when the user supplied language
         // is chinese or auto, the dialect string is non empty, and the
         // dialect resolves to a known language id.
         if (!found->dialect.empty()) {
@@ -336,8 +328,8 @@ bool prompt_builder_build(const PipelineTTS *   pt,
     embed_row_to_f32(pt->gguf_talker, "talker.codec_embd.weight", pt->codec_specials.pad_id, hidden,
                      codec_pad_emb.data());
 
-    // Codec prefill list : 3 ids if auto (no language), 4 otherwise.
-    // Speaker insertion : if a speaker id is set, the codec embedding row
+    // Codec prefill list: 3 ids if auto (no language), 4 otherwise.
+    // Speaker insertion: if a speaker id is set, the codec embedding row
     // for that speaker slips between think_eos and codec_pad in the codec
     // stream, mirroring modeling_qwen3_tts.py lines 2167 to 2172.
     std::vector<int> codec_prefill;
@@ -351,7 +343,7 @@ bool prompt_builder_build(const PipelineTTS *   pt,
     if (speaker_id >= 0) {
         codec_prefill.push_back(speaker_id);
     } else if (ref_spk_emb != NULL) {
-        // Sentinel : the codec_left builder below copies ref_spk_emb in
+        // Sentinel: the codec_left builder below copies ref_spk_emb in
         // place of an embedding lookup whenever it sees -2.
         codec_prefill.push_back(-2);
     }
@@ -360,7 +352,7 @@ bool prompt_builder_build(const PipelineTTS *   pt,
     const int n_pad_pre      = T_codec_prefix - 2;
 
     // Tokenize the instruct segment when non empty. The wrapper mirrors
-    // _build_instruct_text upstream : <|im_start|>user\n{instruct}<|im_end|>\n
+    // _build_instruct_text upstream: <|im_start|>user\n{instruct}<|im_end|>\n
     // The result is a flat list of text token ids that will be projected
     // and placed as standalone vectors at the head of the input embed,
     // with no codec stream contribution.
@@ -376,7 +368,7 @@ bool prompt_builder_build(const PipelineTTS *   pt,
     const int N_instruct = (int) instruct_ids.size();
 
     // Tokenize the reference utterance when ICL is active. The wrap is
-    // identical to the main utterance : assistant role + ref_text +
+    // identical to the main utterance: assistant role + ref_text +
     // im_end + newline + assistant role. We slice [3:-5] later to keep
     // only the inner text body, mirroring input_id[:, 3:-5] upstream.
     std::vector<int> ref_ids;
@@ -392,7 +384,7 @@ bool prompt_builder_build(const PipelineTTS *   pt,
             fprintf(stderr, "[Prompt] FATAL: ref_text tokenized too short (%d tokens)\n", (int) ref_ids.size());
             return false;
         }
-        // ref_ids[3 : -5] is the inner ref text body without role tokens
+        // ref_ids[3: -5] is the inner ref text body without role tokens
         N_ref_text = (int) ref_ids.size() - 3 - 5;
         if (N_ref_text <= 0) {
             fprintf(stderr, "[Prompt] FATAL: empty ref_text body\n");
@@ -424,7 +416,7 @@ bool prompt_builder_build(const PipelineTTS *   pt,
         return out->input_embed.data() + (size_t) r * (size_t) hidden;
     };
 
-    // Instruct prefix : text_proj(text_embed(instruct_ids)). Standalone
+    // Instruct prefix: text_proj(text_embed(instruct_ids)). Standalone
     // vectors with no codec stream (zero pad_id sum, ie nothing added).
     if (N_instruct > 0) {
         std::vector<float> dst;
@@ -433,7 +425,7 @@ bool prompt_builder_build(const PipelineTTS *   pt,
         row += N_instruct;
     }
 
-    // Role : text_proj(text_embed(ids[0:3]))
+    // Role: text_proj(text_embed(ids[0:3]))
     {
         std::vector<float> dst;
         dst.reserve((size_t) 3 * (size_t) hidden);
@@ -442,7 +434,7 @@ bool prompt_builder_build(const PipelineTTS *   pt,
         row += 3;
     }
 
-    // Codec prefix : tts_pad x n_pad_pre + tts_bos, summed with
+    // Codec prefix: tts_pad x n_pad_pre + tts_bos, summed with
     // codec_emb([codec_prefill_list[:-1]] + codec_pad). The Python code
     // takes codec_input_embedding[:, :-1] which drops the codec_bos,
     // leaving [codec_prefill_list..., codec_pad].
@@ -451,10 +443,10 @@ bool prompt_builder_build(const PipelineTTS *   pt,
         codec_left.push_back(pt->codec_specials.pad_id);
         for (int i = 0; i < (int) codec_left.size(); i++) {
             float *       r        = row_ptr(row + i);
-            // text stream : tts_pad * (n - 1) then tts_bos at the end
+            // text stream: tts_pad * (n - 1) then tts_bos at the end
             const float * text_vec = (i == (int) codec_left.size() - 1) ? tts_bos_emb.data() : tts_pad_emb.data();
             std::memcpy(r, text_vec, (size_t) hidden * sizeof(float));
-            // codec stream : either an embedding lookup or, when the
+            // codec stream: either an embedding lookup or, when the
             // sentinel -2 marks the speaker slot, a direct copy of the
             // user supplied ref_spk_emb (voice clone mode A).
             std::vector<float> ce((size_t) hidden);
@@ -469,11 +461,11 @@ bool prompt_builder_build(const PipelineTTS *   pt,
         row += (int) codec_left.size();
     }
 
-    // From here, two paths : standard (no ICL) builds the trailing
+    // From here, two paths: standard (no ICL) builds the trailing
     // utterance text + tts_eos + final_pad, ICL builds an aligned
     // text/codec block that replaces those rows entirely.
     if (!icl) {
-        // Standard layout : trailing utterance text + tts_eos rows summed
+        // Standard layout: trailing utterance text + tts_eos rows summed
         // with codec_pad, then a final tts_pad + codec_bos row.
         for (int i = 0; i < N_text; i++) {
             std::vector<float> e((size_t) text_hid);
@@ -500,23 +492,23 @@ bool prompt_builder_build(const PipelineTTS *   pt,
             row++;
         }
     } else {
-        // ICL layout : compute the text stream and the codec stream
+        // ICL layout: compute the text stream and the codec stream
         // separately then add them. The text stream is text_proj of
-        // [ref_text_ids ; utterance_text_ids] followed by tts_eos. The
+        // [ref_text_ids; utterance_text_ids] followed by tts_eos. The
         // codec stream is codec_emb(codec_bos) followed by sum over the
         // 16 codebook embeddings of ref_codes[i, t] for each frame t.
         // Both streams are aligned to length icl_T per the upstream
         // non_streaming_mode=False branch of generate_icl_prompt.
-        const int T_icl = codec_lens_icl;  // text_lens > codec : truncate to codec, else pad text up to codec
+        const int T_icl = codec_lens_icl;  // text_lens > codec: truncate to codec, else pad text up to codec
 
-        // Build the codec stream [T_icl, hidden]. Row 0 : codec_emb(codec_bos).
-        // Row 1..ref_codes_T : sum over k=0..15 of codebook_k_emb(ref_codes[k, t]).
+        // Build the codec stream [T_icl, hidden]. Row 0: codec_emb(codec_bos).
+        // Row 1..ref_codes_T: sum over k=0..15 of codebook_k_emb(ref_codes[k, t]).
         std::vector<float> codec_stream((size_t) T_icl * (size_t) hidden, 0.0f);
         {
-            // Row 0 : codec_bos lookup.
+            // Row 0: codec_bos lookup.
             embed_row_to_f32(pt->gguf_talker, "talker.codec_embd.weight", pt->codec_specials.bos_id, hidden,
                              codec_stream.data());
-            // Row 1..ref_codes_T : sum over codebooks.
+            // Row 1..ref_codes_T: sum over codebooks.
             std::vector<float> tmp((size_t) hidden);
             for (int t = 0; t < ref_codes_T; t++) {
                 float * dst   = codec_stream.data() + (size_t) (1 + t) * (size_t) hidden;
@@ -535,7 +527,7 @@ bool prompt_builder_build(const PipelineTTS *   pt,
         }
 
         // Build the text stream [text_lens_icl, hidden] = text_proj of
-        // [ref_text ; utterance_text] then tts_eos.
+        // [ref_text; utterance_text] then tts_eos.
         std::vector<float> text_stream((size_t) text_lens_icl * (size_t) hidden, 0.0f);
         for (int i = 0; i < N_ref_text; i++) {
             std::vector<float> e((size_t) text_hid);
@@ -553,9 +545,9 @@ bool prompt_builder_build(const PipelineTTS *   pt,
         std::memcpy(text_stream.data() + (size_t) (text_lens_icl - 1) * (size_t) hidden, tts_eos_emb.data(),
                     (size_t) hidden * sizeof(float));
 
-        // Align the two streams to T_icl. text_lens > codec : truncate
+        // Align the two streams to T_icl. text_lens > codec: truncate
         // text and stash the leftover into trailing_text_hidden. text_lens
-        // <= codec : pad text with tts_pad up to codec, trailing reduces
+        // <= codec: pad text with tts_pad up to codec, trailing reduces
         // to tts_pad.
         std::vector<float> aligned_text((size_t) T_icl * (size_t) hidden, 0.0f);
         if (text_lens_icl >= T_icl) {
@@ -598,11 +590,11 @@ bool prompt_builder_build(const PipelineTTS *   pt,
         return false;
     }
 
-    // Trailing text hidden : non streaming mode (no ICL) collapses the
+    // Trailing text hidden: non streaming mode (no ICL) collapses the
     // overlay to a single row equal to tts_pad_embed
     // (modeling_qwen3_tts.py line 2227). The full utterance text is
     // already integrated into the prefill above as codec_pad summed text
-    // rows + tts_eos, so the overlay loop only ever needs tts_pad : step
+    // rows + tts_eos, so the overlay loop only ever needs tts_pad: step
     // 0 reads trailing_text_hidden[0] which is tts_pad, every later step
     // falls through to the else branch and reads tts_pad_embed. One row,
     // bit exact with the Python hook dump.

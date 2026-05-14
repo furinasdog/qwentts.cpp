@@ -1,10 +1,10 @@
 #pragma once
-// code-predictor-weights.h : 5-layer Qwen3 stack that predicts the
+// code-predictor-weights.h: 5-layer Qwen3 stack that predicts the
 // acoustic codebooks 1..15 of every audio frame conditioned on the
 // Talker hidden state and the codebook 0 token just sampled.
 //
 // Architecture mirrors the Talker block (pre-norm, GQA attention with
-// QK-norm, SwiGLU MLP) with one important difference : RoPE is plain
+// QK-norm, SwiGLU MLP) with one important difference: RoPE is plain
 // 1D (half-split, neox-style in GGUF terms) at freq base 1e6, not the
 // multimodal interleaved variant the Talker uses.
 //
@@ -53,7 +53,7 @@ struct CodePredictorWeights {
 
     // Optional small_to_mtp projection that brings the talker hidden
     // dimension down to the predictor hidden dimension when the two
-    // differ (1.7B-base case : 2048 -> 1024). Both tensors are NULL when
+    // differ (1.7B-base case: 2048 -> 1024). Both tensors are NULL when
     // the upstream sets nn.Identity() i.e. talker_hidden == predictor_hidden
     // (0.6B case). Loaded with gf_try_load_tensor so absence is silent.
     struct ggml_tensor * mtp_proj_w;

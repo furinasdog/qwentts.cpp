@@ -1,5 +1,5 @@
 #pragma once
-// speaker-encoder-extract.h : end to end speaker embedding extraction
+// speaker-encoder-extract.h: end to end speaker embedding extraction
 // from a WAV path. Loads, mono-mixes and resamples to 24 kHz, reflect
 // pads by (n_fft - hop) / 2 = 384 samples, builds the fused mel + ECAPA
 // graph and returns the f32 [enc_dim] embedding.
@@ -12,7 +12,7 @@
 //                          hop=256, win=1024, fmin=0, fmax=12000, center=False)
 //   spk_emb = speaker_encoder(mels)[0]
 //
-// Memory layout : the audio waveform input is passed as a regular ggml
+// Memory layout: the audio waveform input is passed as a regular ggml
 // input tensor [T_pad] f32 living on the talker backend. Caller owns the
 // returned vector. The graph context is freed after each call.
 
@@ -80,7 +80,7 @@ static bool speaker_encoder_extract(const SpeakerEncoderWeights * sw,
         audio_padded[(size_t) (pad + T_in + i)] = raw[T_in - 2 - i];
     }
 
-    // Bake CPU constants once per call : Hann, DFT, mel basis. The cost
+    // Bake CPU constants once per call: Hann, DFT, mel basis. The cost
     // is dominated by the DFT precompute which is 524 KB of f32.
     AudioMelConstants mel_c;
     audio_mel_compute_constants(mel_cfg, mel_c);
@@ -95,7 +95,7 @@ static bool speaker_encoder_extract(const SpeakerEncoderWeights * sw,
     init.no_alloc              = true;
     struct ggml_context * gctx = ggml_init(init);
 
-    // Graph inputs : audio waveform and 4 mel constants.
+    // Graph inputs: audio waveform and 4 mel constants.
     struct ggml_tensor * audio_in  = ggml_new_tensor_1d(gctx, GGML_TYPE_F32, T_pad);
     struct ggml_tensor * hann_in   = ggml_new_tensor_1d(gctx, GGML_TYPE_F32, mel_cfg.n_fft);
     struct ggml_tensor * dft_re_in = ggml_new_tensor_2d(gctx, GGML_TYPE_F32, mel_cfg.n_fft, mel_c.n_freq);
@@ -199,7 +199,7 @@ static bool speaker_encoder_extract(const SpeakerEncoderWeights * sw,
         ggml_build_forward_expand(graph, asp_dump);
     }
 
-    // Reset the shared sched before allocating : the talker may have left
+    // Reset the shared sched before allocating: the talker may have left
     // a residual graph state from a previous synthesis call.
     ggml_backend_sched_reset(sched);
     if (!ggml_backend_sched_alloc_graph(sched, graph)) {
@@ -237,7 +237,7 @@ static bool speaker_encoder_extract(const SpeakerEncoderWeights * sw,
         // raw ggml memory layout, matching the Python side dump.
         debug_dump_2d(&d, "mel-spk", buf.data(), (int) mel_dump->ne[1], (int) mel_dump->ne[0]);
 
-        // CPU side mel constants : audit against torch.hann_window and
+        // CPU side mel constants: audit against torch.hann_window and
         // librosa.filters.mel produced by the Python upstream. Layouts
         // are kept as numpy [n_fft] for hann and [n_mels, n_freq] for
         // mel_basis, matching the librosa convention.
@@ -249,7 +249,7 @@ static bool speaker_encoder_extract(const SpeakerEncoderWeights * sw,
             std::vector<float> bm(nm);
             ggml_backend_tensor_get(mag_dump, bm.data(), 0, nm * sizeof(float));
             // mag_dump has ggml ne=(n_freq, T_frames). Same dumping
-            // convention as mel-spk : passing (ne[1], ne[0]) writes
+            // convention as mel-spk: passing (ne[1], ne[0]) writes
             // shape [T_frames, n_freq] over the raw memory layout.
             debug_dump_2d(&d, "mel-mag", bm.data(), (int) mag_dump->ne[1], (int) mag_dump->ne[0]);
         }

@@ -1,13 +1,13 @@
-// qwen-tts.cpp : thin CLI wrapper around the qwentts.cpp public ABI.
+// qwen-tts.cpp: thin CLI wrapper around the qwentts.cpp public ABI.
 // Parses arguments, reads the optional reference WAV plus transcript,
 // hands off to qwen_synthesize and writes the resulting waveform as a
 // WAV file. All synthesis logic, mode validation and seed resolution
 // live behind the qwen_* facade declared in qwen.h.
 //
-// Talker variants : 0.6B-Base / 0.6B-CustomVoice / 1.7B-Base /
+// Talker variants: 0.6B-Base / 0.6B-CustomVoice / 1.7B-Base /
 // 1.7B-CustomVoice / 1.7B-VoiceDesign. The decoder path is selected
 // from GGUF metadata at qwen_init time. The CLI surface mirrors the
-// omnivoice.cpp tooling : kebab-case flags, --format wav16/wav24/wav32,
+// omnivoice.cpp tooling: kebab-case flags, --format wav16/wav24/wav32,
 // -o '-' streams to stdout, --seed -1 means non deterministic
 // (resolved inside qwen_synthesize), the utterance text comes from
 // --text or stdin if --text is absent.
@@ -23,7 +23,7 @@
 #include <sstream>
 #include <string>
 
-// Tokenizer sample rate for the 12 Hz Qwen3-TTS codec : 24 kHz. Used
+// Tokenizer sample rate for the 12 Hz Qwen3-TTS codec: 24 kHz. Used
 // by audio_read_mono to resample the optional --ref-wav file before
 // handing it to the facade. The output sample rate is reported by
 // qwen_audio.sample_rate after a successful synthesis.
@@ -178,7 +178,7 @@ static bool parse_args(int argc, char ** argv, Args & a) {
         } else if (std::strcmp(arg, "--seed") == 0 && i + 1 < argc) {
             a.seed = (int64_t) std::atoll(argv[++i]);
         } else if (std::strcmp(arg, "--greedy") == 0) {
-            // Greedy mode : argmax sampling on both stacks. The sampling
+            // Greedy mode: argmax sampling on both stacks. The sampling
             // fast path in sampling.h uses temperature <= 0 to short
             // circuit to argmax, bypassing rep penalty and top-k/p
             // truncation, which exactly mirrors the Python reference
@@ -212,7 +212,7 @@ static bool parse_args(int argc, char ** argv, Args & a) {
 static int run(const Args & a) {
     // Init the facade. The seven mode validations
     // (base / custom_voice / voice_design rules) and the BPE tokenizer
-    // load live inside qwen_init / qwen_synthesize ; the CLI just hands
+    // load live inside qwen_init / qwen_synthesize; the CLI just hands
     // off the two GGUF paths and reports qwen_last_error on failure.
     qwen_init_params iparams;
     qwen_init_default_params(&iparams);
@@ -265,7 +265,7 @@ static int run(const Args & a) {
         ref_n_samples = T_in;
     }
 
-    // Resolve output WAV format string : wav16 / wav24 / wav32. Default
+    // Resolve output WAV format string: wav16 / wav24 / wav32. Default
     // wav16 mirrors the omnivoice.cpp default.
     WavFormat wav_fmt;
     if (!audio_parse_format(a.format, wav_fmt)) {
@@ -274,7 +274,7 @@ static int run(const Args & a) {
         return 1;
     }
 
-    // Resolve utterance text : explicit --text wins, otherwise read stdin
+    // Resolve utterance text: explicit --text wins, otherwise read stdin
     // fully. Empty stdin combined with no --text triggers a clean error.
     std::string  text_buf;
     const char * text = a.text;

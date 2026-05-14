@@ -9,7 +9,7 @@
 // Each side has the same shape:
 //   input_proj  : Conv1d k=1, 512 -> 256 (linear projection on channels)
 //   codebooks   : list of [2048, 256] f32 entries used as kNN centroids
-//   output_proj : Conv1d k=1, 256 -> 512 (used only inside the residual loop)
+//   output_proj: Conv1d k=1, 256 -> 512 (used only inside the residual loop)
 //
 // At encode time we run, for each side:
 //   y     = input_proj(x)
@@ -230,7 +230,7 @@ static void qwen_quantizer_encode_side_loop(const QwenQuantizerEncodeHost * h,
 // Full RVQ encode. Takes the post-downsample hidden [T, hidden_size] f32
 // row-major buffer and returns flat codes [K, T] row-major, where K is
 // QWEN_ENC_QUANT_TOTAL = 16.
-//   hidden : [T, hidden_size] f32 row-major (T fast in pseudo, but here
+//   hidden: [T, hidden_size] f32 row-major (T fast in pseudo, but here
 //            row-major means index = t*hidden + c, t slow, c fast)
 //
 // Returns codes flat as [16, T] row-major: codes[k*T + t].

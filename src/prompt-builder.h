@@ -1,9 +1,9 @@
 #pragma once
-// prompt-builder.h : assemble the talker prefix input embedding from
+// prompt-builder.h: assemble the talker prefix input embedding from
 // a tokenized text plus a language tag, mirroring the upstream
 // generate() function of Qwen3-TTS.
 //
-// Output shape : [T_ctx, hidden_size] f32 row-major. Two pad-aligned
+// Output shape: [T_ctx, hidden_size] f32 row-major. Two pad-aligned
 // streams (text and codec) are summed at the granularity of single
 // vectors. The trailing text hidden buffer is also produced for the
 // streaming-text overlay used during generation.
@@ -30,7 +30,7 @@ struct PromptBuilderOutput {
     int                T_ctx;
     int                hidden;
 
-    // Trailing text overlay : added on top of the next-token-input during
+    // Trailing text overlay: added on top of the next-token-input during
     // the autoregressive loop, one vector per generated frame until
     // exhausted, then tts_pad_embed for every following frame.
     std::vector<float> trailing_text_hidden;
@@ -52,9 +52,9 @@ struct PromptBuilderOutput {
 // (empty for none). speaker_name is the lowercased speaker key looked up
 // in pt->speakers (empty for none). ref_spk_emb is an optional pointer to
 // an [hidden] f32 vector that takes the place of the speaker preset row
-// for voice clone mode A : when non NULL it is inserted between think_eos
+// for voice clone mode A: when non NULL it is inserted between think_eos
 // and codec_pad in the codec stream, mutually exclusive with speaker_name.
-// ref_text and ref_codes activate voice clone mode B (ICL) : the prompt
+// ref_text and ref_codes activate voice clone mode B (ICL): the prompt
 // becomes [icl_text + tts_eos] aligned with [codec_bos + ref_codes_summed],
 // where ref_codes is a flat [num_code_groups, T_codec] int32 buffer
 // produced by pipeline_codec_encode on the resampled reference audio.

@@ -54,7 +54,7 @@ extern "C" {
 // callers and the lib reads only what its abi_version permits.
 //
 // There is no separate semver triple. The runtime build identity is the
-// git short hash + commit date string returned by qwen_version() ; for
+// git short hash + commit date string returned by qwen_version(); for
 // binding compat checks, QWEN_ABI_VERSION is the only number that
 // matters. Aligned on OV_ABI_VERSION = 2 for the omnivoice ABI cousin.
 #define QWEN_ABI_VERSION 2
@@ -77,7 +77,7 @@ enum qwen_status {
 // Returns the last error message produced on the calling thread by any
 // qwen_* entry, as a NUL terminated UTF-8 string. errno-style semantics:
 // the pointer is only meaningful right after a failure (qwen_init
-// returning NULL, or any qwen_* entry returning a negative qwen_status) ;
+// returning NULL, or any qwen_* entry returning a negative qwen_status);
 // calling it after a successful entry yields the previous message or an
 // empty string. Storage is thread local so two threads running
 // qwen_synthesize concurrently never race on each other's diagnostics.
@@ -106,10 +106,10 @@ struct qwen_context;
 
 // Initialisation parameters. Both GGUF paths are required: the talker
 // GGUF holds the LM weights, the code predictor MTP head and (for
-// custom_voice / voice_design checkpoints) the speaker encoder ; the
+// custom_voice / voice_design checkpoints) the speaker encoder; the
 // codec GGUF holds the 12 Hz audio tokenizer. abi_version stays first
 // so a future struct growth keeps reading the version field at offset
-// 0. No use_fa / clamp_fp16 yet : the current pipeline_tts_load picks
+// 0. No use_fa / clamp_fp16 yet: the current pipeline_tts_load picks
 // flash attention from backend capability without a user knob.
 struct qwen_init_params {
     int          abi_version;
@@ -134,8 +134,8 @@ QWEN_API void qwen_free(struct qwen_context * q);
 // Log severity. Numerically ordered so a callback can filter with a
 // simple `if (level < threshold) return;`. ERROR is reserved for
 // failure reports that the lib also surfaces via qwen_status /
-// qwen_last_error ; WARN for recoverable surprises ; INFO for the
-// normal load and synthesis cadence ; DEBUG for tensor-level cossim
+// qwen_last_error; WARN for recoverable surprises; INFO for the
+// normal load and synthesis cadence; DEBUG for tensor-level cossim
 // diagnostics.
 enum qwen_log_level {
     QWEN_LOG_DEBUG = 0,
@@ -152,17 +152,17 @@ enum qwen_log_level {
 typedef void (*qwen_log_cb)(enum qwen_log_level level, const char * msg, void * user_data);
 
 // Install a global log callback. Passing cb == NULL restores the
-// default behaviour (write to stderr). Safe to call at any point ;
+// default behaviour (write to stderr). Safe to call at any point;
 // takes effect immediately on subsequent log emissions across every
 // thread. Storage is process wide, not per handle, matching
 // whisper_log_set / llama_log_set / ov_log_set.
 QWEN_API void qwen_log_set(qwen_log_cb cb, void * user_data);
 
-// Synthesis parameters. Strings are NULL terminated UTF-8 ; NULL maps
+// Synthesis parameters. Strings are NULL terminated UTF-8; NULL maps
 // to empty where the underlying pipeline accepts it. The selection
 // between base / custom_voice / voice_design synthesis mode is driven
 // by the model_type read from the talker GGUF at qwen_init time, not
-// by an explicit flag here ; the seven mode rules are enforced inside
+// by an explicit flag here; the seven mode rules are enforced inside
 // qwen_synthesize and surface as QWEN_STATUS_MODE_INVALID with a
 // descriptive qwen_last_error(). abi_version stays first so the lib
 // can route on it before reading any field that may have shifted in a
@@ -172,7 +172,7 @@ struct qwen_tts_params {
 
     // Input text and language hint. lang accepts the upstream
     // qwen3-tts language names ("english", "chinese", "auto", ...).
-    // instruct is the style instruction string ; required for
+    // instruct is the style instruction string; required for
     // voice_design, optional for custom_voice, rejected for base.
     // speaker is the named speaker for custom_voice models, rejected
     // for the other two modes.
@@ -182,7 +182,7 @@ struct qwen_tts_params {
     const char * speaker;
 
     // Optional voice reference for base mode voice cloning. Mode A
-    // (x_vector_only) sets ref_audio_24k only ; mode B (ICL) sets
+    // (x_vector_only) sets ref_audio_24k only; mode B (ICL) sets
     // both ref_audio_24k and ref_text. ref_audio_24k is a mono float
     // PCM buffer sampled at the codec sample rate (24 kHz). Mutually
     // exclusive with speaker. Rejected for custom_voice / voice_design.
@@ -223,7 +223,7 @@ QWEN_API void qwen_tts_default_params(struct qwen_tts_params * p);
 // model_type (the seven base / custom_voice / voice_design rules),
 // resolves the seed, hands off to pipeline_tts_synthesize and fills
 // `out` with mono float PCM at the codec sample rate. Returns
-// QWEN_STATUS_OK on success ; on any failure returns a negative
+// QWEN_STATUS_OK on success; on any failure returns a negative
 // qwen_status describing the cause and leaves `out` empty.
 QWEN_API enum qwen_status qwen_synthesize(struct qwen_context *          q,
                                           const struct qwen_tts_params * params,

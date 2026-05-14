@@ -1,10 +1,10 @@
 #pragma once
-// talker-weights.h : Qwen3-style autoregressive Talker LM weights.
+// talker-weights.h: Qwen3-style autoregressive Talker LM weights.
 //
 // Carries 28 decoder layers in 0.6B (36 in 1.7B), each with pre-norm
 // attention plus pre-norm SwiGLU MLP. Attention is multi-head with GQA
 // (16 query heads, 8 kv heads, head_dim 128) and per-head QK-norm. RoPE
-// is mrope-interleaved with sections [24, 20, 20] and freq base 1e6 ;
+// is mrope-interleaved with sections [24, 20, 20] and freq base 1e6;
 // in TTS-only mode this collapses to plain interleaved 1D RoPE since
 // the three multimodal axes carry the same position index.
 //

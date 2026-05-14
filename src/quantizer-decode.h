@@ -1,10 +1,10 @@
 #pragma once
-// quantizer-decode.h : split RVQ decode for the Qwen3-TTS 12Hz tokenizer
+// quantizer-decode.h: split RVQ decode for the Qwen3-TTS 12Hz tokenizer
 // (GGML).
 // Reads 16 codebooks (1 semantic + 15 acoustic) of 2048 entries with
 // internal dim 256, and produces a 512-channel hidden representation.
 //
-// Decode side : codes [T, 16] i32 -> hidden [T, 512] f32 by summing
+// Decode side: codes [T, 16] i32 -> hidden [T, 512] f32 by summing
 // F.embedding(codes[:, k], codebook_k) within each split, then applying
 // a per-split output_proj 1x1 conv (256 -> 512), then summing the two
 // splits.
@@ -12,6 +12,7 @@
 #include "ggml-backend.h"
 #include "ggml.h"
 #include "gguf-weights.h"
+#include "qt-error.h"
 #include "weight-ctx.h"
 
 #include <cstdio>
@@ -46,13 +47,10 @@ struct QwenQuantizerDecoder {
 static struct ggml_tensor * qwen_load_proj_1x1(WeightCtx * wctx, const GGUFModel & gf, const std::string & name) {
     struct ggml_tensor * src = ggml_get_tensor(gf.meta, name.c_str());
     if (!src) {
-        fprintf(stderr, "[Quantizer] FATAL: tensor '%s' not found\n", name.c_str());
-        exit(1);
+        qt_throw("[Quantizer] tensor '%s' not found", name.c_str());
     }
     if (src->ne[0] != 1) {
-        fprintf(stderr, "[Quantizer] FATAL: '%s' expected kernel=1 on ne[0], got %lld\n", name.c_str(),
-                (long long) src->ne[0]);
-        exit(1);
+        qt_throw("[Quantizer] '%s' expected kernel=1 on ne[0], got %lld", name.c_str(), (long long) src->ne[0]);
     }
     int64_t shape2d[2] = { src->ne[1], src->ne[2] };  // (in_dim, out_dim) in ggml row-major
     return gf_load_tensor(wctx, gf, name, shape2d, 2);
@@ -127,7 +125,7 @@ static void qwen_quantizer_decoder_free(QwenQuantizerDecoder * dec) {
 // split, then project from internal_dim (256) to hidden (512) via a
 // Conv1d 1x1 (mat_mul against out_proj_w).
 //
-// codes_split : [T, K] i32, K is the codebook count of this split
+// codes_split: [T, K] i32, K is the codebook count of this split
 // returns     : [hidden, T] f32
 static struct ggml_tensor * qwen_rvq_group_decode(struct ggml_context * ctx,
                                                   const QwenRVQGroup &  g,
@@ -139,14 +137,14 @@ static struct ggml_tensor * qwen_rvq_group_decode(struct ggml_context * ctx,
         struct ggml_tensor * emb = ggml_get_rows(ctx, g.embed[k], idx);
         sum                      = (sum == NULL) ? emb : ggml_add(ctx, sum, emb);
     }
-    // sum : [internal_dim=256, T]
-    // out_proj_w : [internal_dim=256, hidden=512]
+    // sum: [internal_dim=256, T]
+    // out_proj_w: [internal_dim=256, hidden=512]
     // ggml_mul_mat returns [hidden=512, T]
     return ggml_mul_mat(ctx, g.out_proj_w, sum);
 }
 
-// codes : [T, num_quantizers=16] i32
-// returns : [hidden=512, T] f32
+// codes: [T, num_quantizers=16] i32
+// returns: [hidden=512, T] f32
 static struct ggml_tensor * qwen_quantizer_decode(struct ggml_context *        ctx,
                                                   const QwenQuantizerDecoder * dec,
                                                   struct ggml_tensor *         codes) {

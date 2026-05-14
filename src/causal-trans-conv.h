@@ -4,7 +4,7 @@
 //
 // PyTorch reference (Qwen3TTSTokenizerV2CausalTransConvNet):
 //   y = ConvTranspose1d(x, k, stride)         # raw length (T-1)*stride + K
-//   y = y[..., : y.shape[-1] - (K - stride)]  # right-trim K-stride frames
+//   y = y[...,: y.shape[-1] - (K - stride)]  # right-trim K-stride frames
 //   final length: T * stride
 //
 // GGML implementation: the weight is pre-permuted at load time from the
@@ -17,6 +17,7 @@
 
 #include "ggml.h"
 #include "gguf-weights.h"
+#include "qt-error.h"
 #include "weight-ctx.h"
 
 #include <cstdio>
@@ -33,19 +34,16 @@
 static struct ggml_tensor * qwen_load_ctw_f32(WeightCtx * wctx, const GGUFModel & gf, const std::string & name) {
     struct ggml_tensor * src = ggml_get_tensor(gf.meta, name.c_str());
     if (!src) {
-        fprintf(stderr, "[CausalTransConv] FATAL: tensor '%s' not found\n", name.c_str());
-        exit(1);
+        qt_throw("[CausalTransConv] tensor '%s' not found", name.c_str());
     }
     // Source dtype follows the GGUF norm (pure llama.cpp policy). The F32
     // master keeps tensors in F32, the BF16 variant keeps them in their
     // source BF16, and the K-quant variants land them in F16 through the
     // aligned fallback (kernel rows of width K=2 do not divide a K-quant
-    // block size). All three are widened to F32 here ; the K*OC*IC
+    // block size). All three are widened to F32 here; the K*OC*IC
     // permutation always lands in a freshly allocated F32 buffer anyway.
     if (src->type != GGML_TYPE_F32 && src->type != GGML_TYPE_F16 && src->type != GGML_TYPE_BF16) {
-        fprintf(stderr, "[CausalTransConv] FATAL: '%s' expected F32, F16 or BF16, got type %d\n", name.c_str(),
-                (int) src->type);
-        exit(1);
+        qt_throw("[CausalTransConv] '%s' expected F32, F16 or BF16, got type %d", name.c_str(), (int) src->type);
     }
     int K  = (int) src->ne[0];
     int OC = (int) src->ne[1];

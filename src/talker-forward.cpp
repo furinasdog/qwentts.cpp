@@ -1,4 +1,4 @@
-// talker-forward.cpp : eager prefill graph for the Talker LM.
+// talker-forward.cpp: eager prefill graph for the Talker LM.
 //
 // Mirrors Qwen3TTSTalkerDecoderLayer for TTS-only operation :
 //   pre-norm, GQA attention with per-head QK-norm, mrope collapsed to
@@ -7,7 +7,7 @@
 //   RMSNorm and codec_head. Eager softmax in F32, no flash-attention,
 //   no KV cache.
 //
-// Tensor shapes follow ggml row-major convention : ne[0] is the fastest
+// Tensor shapes follow ggml row-major convention: ne[0] is the fastest
 // axis. Our input embedding lives as [hidden, T] inside the graph and
 // the loader feeds it from a [T, hidden] f32 row-major host buffer
 // (which becomes [hidden, T] in ggml after a 2d view because rows on
@@ -25,7 +25,7 @@
 #include <vector>
 
 // Bisect layers dumped when a dump_dir is set. Match the Python hook list
-// in tests/debug-tts-cossim.py : 0, 7, 14, 21, 27.
+// in tests/debug-tts-cossim.py: 0, 7, 14, 21, 27.
 static const int BISECT_LAYERS[] = { 0, 7, 14, 21, 27 };
 static const int N_BISECT_LAYERS = (int) (sizeof(BISECT_LAYERS) / sizeof(BISECT_LAYERS[0]));
 
@@ -72,7 +72,7 @@ static struct ggml_tensor * talker_layer_forward(struct ggml_context * ctx,
     k = ggml_reshape_3d(ctx, k, hd, n_kv, T);
     v = ggml_reshape_3d(ctx, v, hd, n_kv, T);
 
-    // Per-head QK-norm : RMS over hd, then multiply by [hd] gain. The
+    // Per-head QK-norm: RMS over hd, then multiply by [hd] gain. The
     // norm operates on ne[0] = hd, identical layout for q (16 heads) and
     // k (8 heads), so the same code path covers both.
     q = ggml_rms_norm(ctx, q, eps);
@@ -114,9 +114,9 @@ static struct ggml_tensor * talker_layer_forward(struct ggml_context * ctx,
     struct ggml_tensor * v_full = ggml_view_3d(ctx, v_cache, hd, T_full, n_kv, v_cache->nb[1], v_cache->nb[2], 0);
 
     // Q permute [hd, n_q_heads, T] -> [hd, T, n_q_heads]. flash_attn_ext
-    // expects ne[1] = n_batch and ne[2] = n_head ; the GQA broadcast
+    // expects ne[1] = n_batch and ne[2] = n_head; the GQA broadcast
     // check ggml_can_mul_mat is n_head % n_head_kv == 0, matching K layout.
-    // No cont : flash_attn_ext takes the view directly, like acestep does.
+    // No cont: flash_attn_ext takes the view directly, like acestep does.
     struct ggml_tensor * q_p = ggml_permute(ctx, q, 0, 2, 1, 3);
 
     // Fused flash attention. The manual mul_mat + soft_max_ext + mul_mat
@@ -137,7 +137,7 @@ static struct ggml_tensor * talker_layer_forward(struct ggml_context * ctx,
 
     x = ggml_add(ctx, x, o);
 
-    // MLP block : pre-norm + SwiGLU + residual
+    // MLP block: pre-norm + SwiGLU + residual
     struct ggml_tensor * h2 = ggml_rms_norm(ctx, x, eps);
     h2                      = ggml_mul(ctx, h2, layer.post_attn_norm_w);
 
@@ -169,7 +169,7 @@ static bool talker_forward_core(const TalkerWeights * tw,
     const int T_full   = n_past + T;
 
     // Dedicated context for graph + IO tensors. Counts approximate :
-    //   per layer : ~38 ops (added 2 cpy + 4 views per layer for KV)
+    //   per layer: ~38 ops (added 2 cpy + 4 views per layer for KV)
     //   IO        : 4 tensors (input embed, positions, mask, output norm)
     //   final     : norm + codec_head + dump branches
     const int    max_nodes         = 48 * n_layers + 256;
@@ -186,8 +186,8 @@ static bool talker_forward_core(const TalkerWeights * tw,
         return false;
     }
 
-    // IO tensors : input embedding, positions, causal mask. The mask
-    // spans [T_full, T] : for each fresh query q in [0, T) we allow
+    // IO tensors: input embedding, positions, causal mask. The mask
+    // spans [T_full, T]: for each fresh query q in [0, T) we allow
     // keys k in [0, n_past + q]. In the decode case (T=1) this is a
     // single row of zeros of length T_full.
     struct ggml_tensor * x_in    = ggml_new_tensor_2d(gctx, GGML_TYPE_F32, hidden, T);
@@ -225,7 +225,7 @@ static bool talker_forward_core(const TalkerWeights * tw,
     ggml_set_name(h_final, "hidden_final");
     ggml_set_output(h_final);
 
-    // codec_head : [hidden, vocab]. ggml_mul_mat returns [vocab, T].
+    // codec_head: [hidden, vocab]. ggml_mul_mat returns [vocab, T].
     struct ggml_tensor * logits = ggml_mul_mat(gctx, tw->codec_head_w, h_final);
     ggml_set_name(logits, "logits");
 
@@ -249,7 +249,7 @@ static bool talker_forward_core(const TalkerWeights * tw,
     // Upload input embedding (host [T, hidden] -> ggml [hidden, T]).
     ggml_backend_tensor_set(x_in, input_embed, 0, (size_t) T * (size_t) hidden * sizeof(float));
 
-    // Positions : n_past .. n_past + T - 1
+    // Positions: n_past .. n_past + T - 1
     {
         std::vector<int32_t> pos((size_t) T);
         for (int i = 0; i < T; i++) {
@@ -258,7 +258,7 @@ static bool talker_forward_core(const TalkerWeights * tw,
         ggml_backend_tensor_set(pos_in, pos.data(), 0, (size_t) T * sizeof(int32_t));
     }
 
-    // Causal mask : 0 where k <= n_past + q, -inf otherwise. Stored
+    // Causal mask: 0 where k <= n_past + q, -inf otherwise. Stored
     // row-major [T_q, T_k] with T_k as the fast axis (ne[0]). F16 dtype
     // matches ggml_flash_attn_ext convention used by the attention path.
     {
@@ -284,7 +284,7 @@ static bool talker_forward_core(const TalkerWeights * tw,
         return false;
     }
 
-    // Bisect dumps : pull each tap [hidden, T] back to host as [T, hidden].
+    // Bisect dumps: pull each tap [hidden, T] back to host as [T, hidden].
     if (record_taps) {
         DebugDumper d;
         debug_init(&d, dump_dir);
@@ -302,7 +302,7 @@ static bool talker_forward_core(const TalkerWeights * tw,
         debug_dump_2d(&d, "talker-hidden-prefill-final", buf.data(), T, hidden);
     }
 
-    // Pull the last position : final hidden + logits
+    // Pull the last position: final hidden + logits
     out->hidden = hidden;
     out->vocab  = vocab;
     out->hidden_last.assign((size_t) hidden, 0.0f);

@@ -190,7 +190,7 @@ static struct ggml_tensor * qwen_seanet_resnet_forward(struct ggml_context *    
 // layout ne=(C, T_out) for debug bisection. Each is NULL by default and
 // the caller decides whether to mark them as graph outputs.
 //   init_out    : post init MimiConv1d k=7, [T_audio, 64]
-//   resnet0_out : post stage 0 resnet block, before ELU+downsample, [T_audio, 64]
+//   resnet0_out: post stage 0 resnet block, before ELU+downsample, [T_audio, 64]
 //   stage0_out  : post stage 0 (resnet + ELU + downsample 4x), [T_audio/4, 128]
 //   stage1_out  : post stage 1 (resnet + ELU + downsample 5x), [T_audio/20, 256]
 //   stage3_out  : post stage 3 (resnet + ELU + downsample 8x), [T_audio/960, 1024]

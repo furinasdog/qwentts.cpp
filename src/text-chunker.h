@@ -7,7 +7,7 @@
 // undersized chunks into a neighbour. Strings are UTF-8 in, UTF-8 out.
 // Comparison and length are codepoint-based, matching Python str
 // semantics.
-// Math reference : omnivoice/utils/text.py (1:1 port).
+// Math reference: omnivoice/utils/text.py (1:1 port).
 
 #include <set>
 #include <string>

@@ -1,5 +1,5 @@
 #pragma once
-// pipeline-tts.h : full TTS pipeline composition (Talker LM + code
+// pipeline-tts.h: full TTS pipeline composition (Talker LM + code
 // predictor MTP head + optional speaker encoder + 12Hz codec decoder).
 //
 // Phase 2.0 covers load-only: parse hyperparameters from both GGUF
@@ -90,7 +90,7 @@ struct PipelineTTS {
     ggml_backend_t       backend;
     ggml_backend_sched_t sched;
 
-    // Persistent KV caches : the talker holds the LM context, the
+    // Persistent KV caches: the talker holds the LM context, the
     // predictor holds one frame's 16 sub-steps and gets reset every
     // frame in code_predictor_step.
     KVCache talker_kv;
@@ -106,10 +106,10 @@ void pipeline_tts_free(PipelineTTS * pt);
 
 struct BPETokenizer;
 
-// Parameters for one synthesis call. Lifetime constraint : text and lang
+// Parameters for one synthesis call. Lifetime constraint: text and lang
 // are borrowed pointers, must outlive the call. dump_dir, when non-NULL,
 // captures step 0 prefill activations plus the codes-full / output-audio
-// dumps under the named directory ; debug only, slows the run.
+// dumps under the named directory; debug only, slows the run.
 struct PipelineTTSSynthesizeParams {
     const char *  text;
     const char *  lang;
@@ -133,13 +133,13 @@ struct PipelineTTSSynthesizeParams {
 };
 
 // Output of one synthesis call. audio is a 24 kHz mono F32 PCM buffer
-// already decoded through the codec ; the caller writes it to disk.
+// already decoded through the codec; the caller writes it to disk.
 struct PipelineTTSSynthesizeOutput {
     std::vector<float> audio;
     int                sample_rate;
 };
 
-// Run the full TTS pipeline : prompt assembly, prefill, frame loop with
+// Run the full TTS pipeline: prompt assembly, prefill, frame loop with
 // sampling, codec decode. Returns false on any failure with a diagnostic
 // already routed through qt_log / qt_set_error.
 bool pipeline_tts_synthesize(PipelineTTS *                       pt,

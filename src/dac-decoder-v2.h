@@ -26,6 +26,7 @@
 #include "ggml-backend.h"
 #include "ggml.h"
 #include "gguf-weights.h"
+#include "qt-error.h"
 #include "weight-ctx.h"
 
 #include <cmath>
@@ -100,18 +101,14 @@ static void qwen_dac_load_snakebeta(WeightCtx *         wctx,
     struct ggml_tensor * alpha_meta = ggml_get_tensor(gf.meta, alpha_name.c_str());
     struct ggml_tensor * beta_meta  = ggml_get_tensor(gf.meta, beta_name.c_str());
     if (!alpha_meta || !beta_meta) {
-        fprintf(stderr, "[DAC] FATAL: snake tensor '%s' or '%s' not found\n", alpha_name.c_str(), beta_name.c_str());
-        exit(1);
+        qt_throw("[DAC] snake tensor '%s' or '%s' not found", alpha_name.c_str(), beta_name.c_str());
     }
     if (alpha_meta->type != GGML_TYPE_F32 || beta_meta->type != GGML_TYPE_F32) {
-        fprintf(stderr, "[DAC] FATAL: snake '%s' expects F32 alpha/beta\n", alpha_name.c_str());
-        exit(1);
+        qt_throw("[DAC] snake '%s' expects F32 alpha/beta", alpha_name.c_str());
     }
     int C = (int) alpha_meta->ne[0];
     if ((int) beta_meta->ne[0] != C) {
-        fprintf(stderr, "[DAC] FATAL: snake '%s' alpha/beta size mismatch (%d vs %d)\n", alpha_name.c_str(), C,
-                (int) beta_meta->ne[0]);
-        exit(1);
+        qt_throw("[DAC] snake '%s' alpha/beta size mismatch (%d vs %d)", alpha_name.c_str(), C, (int) beta_meta->ne[0]);
     }
 
     s->a     = ggml_new_tensor_2d(wctx->ctx, GGML_TYPE_F32, 1, C);

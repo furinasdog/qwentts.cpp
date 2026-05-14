@@ -1,4 +1,4 @@
-// code-predictor-forward.cpp : eager full-recompute graph for the
+// code-predictor-forward.cpp: eager full-recompute graph for the
 // Qwen3-TTS code predictor (5-layer Qwen3 stack with plain 1D NEOX
 // RoPE, GQA attention with QK-norm, SwiGLU MLP, head-per-codebook
 // output projection).
@@ -20,6 +20,7 @@
 #include "ggml-alloc.h"
 #include "ggml-backend.h"
 #include "ggml.h"
+#include "qt-error.h"
 
 #include <cmath>
 #include <cstdio>
@@ -28,7 +29,7 @@
 #include <vector>
 
 // One Qwen3 decoder block, KV cached. K and V for the T fresh positions
-// are written into the cache at [n_past, n_past+T) on dim 1 ; the
+// are written into the cache at [n_past, n_past+T) on dim 1; the
 // attention reads the contiguous slice [0, n_past+T). Returns the layer
 // output [hidden, T].
 static struct ggml_tensor * code_predictor_layer_forward(struct ggml_context *        ctx,
@@ -114,7 +115,7 @@ static struct ggml_tensor * code_predictor_layer_forward(struct ggml_context *  
     return x;
 }
 
-// Run one predictor pass : feed `T` fresh embeddings starting at cache
+// Run one predictor pass: feed `T` fresh embeddings starting at cache
 // position `n_past`, run all 5 layers, and pull the logits for the last
 // position through lm_head[g_head]. The cache is written as a side
 // effect so subsequent decode steps can append a single token.
@@ -141,7 +142,7 @@ static bool code_predictor_run(const CodePredictorWeights * cw,
         return false;
     }
 
-    // Inputs : fresh embeddings (talker_hidden), positions, attention mask
+    // Inputs: fresh embeddings (talker_hidden), positions, attention mask
     struct ggml_tensor * x_in    = ggml_new_tensor_2d(gctx, GGML_TYPE_F32, talker_hidden, T);
     struct ggml_tensor * pos_in  = ggml_new_tensor_1d(gctx, GGML_TYPE_I32, T);
     struct ggml_tensor * mask_in = ggml_new_tensor_2d(gctx, GGML_TYPE_F16, T_full, T);
@@ -151,7 +152,7 @@ static bool code_predictor_run(const CodePredictorWeights * cw,
 
     struct ggml_cgraph * gf = ggml_new_graph_custom(gctx, max_nodes, false);
 
-    // small_to_mtp projection : Linear(talker_hidden -> hidden) with bias.
+    // small_to_mtp projection: Linear(talker_hidden -> hidden) with bias.
     // When absent (Identity case) the input is already at predictor hidden.
     struct ggml_tensor * h = x_in;
     if (cw->mtp_proj_w) {
@@ -231,12 +232,10 @@ static bool code_predictor_run(const CodePredictorWeights * cw,
 // dispatched through ggml_get_type_traits so quants are accepted.
 static void embed_row_from_backend(struct ggml_tensor * t, int row_id, int dim, float * dst) {
     if (t->ne[0] != dim) {
-        fprintf(stderr, "[CodePredictor] FATAL: embed dim mismatch %lld vs %d\n", (long long) t->ne[0], dim);
-        std::exit(1);
+        qt_throw("[CodePredictor] embed dim mismatch %lld vs %d", (long long) t->ne[0], dim);
     }
     if (row_id < 0 || row_id >= (int) t->ne[1]) {
-        fprintf(stderr, "[CodePredictor] FATAL: row %d out of range (vocab=%lld)\n", row_id, (long long) t->ne[1]);
-        std::exit(1);
+        qt_throw("[CodePredictor] row %d out of range (vocab=%lld)", row_id, (long long) t->ne[1]);
     }
     const size_t row_bytes = ggml_row_size(t->type, dim);
     if (t->type == GGML_TYPE_F32) {
@@ -245,8 +244,7 @@ static void embed_row_from_backend(struct ggml_tensor * t, int row_id, int dim, 
     }
     const struct ggml_type_traits * tt = ggml_get_type_traits(t->type);
     if (!tt || !tt->to_float) {
-        fprintf(stderr, "[CodePredictor] FATAL: unsupported embed dtype %d\n", (int) t->type);
-        std::exit(1);
+        qt_throw("[CodePredictor] unsupported embed dtype %d", (int) t->type);
     }
     std::vector<uint8_t> tmp(row_bytes);
     ggml_backend_tensor_get(t, tmp.data(), (size_t) row_id * row_bytes, row_bytes);
@@ -266,7 +264,7 @@ bool code_predictor_step(const TalkerWeights *        tw,
                          int64_t                      subseq_base,
                          const char *                 dump_dir,
                          CodePredictorOutput *        out) {
-    // sub_input slots live at the talker hidden dimension : both the
+    // sub_input slots live at the talker hidden dimension: both the
     // talker last hidden and the codec_embedding rows feeding the sub
     // network are talker sized in the upstream checkpoint. The graph's
     // mtp_proj brings them down to predictor hidden when present.
@@ -282,7 +280,7 @@ bool code_predictor_step(const TalkerWeights *        tw,
     out->codes.assign((size_t) (n_acoustic + 1), 0);
     out->codes[0] = c0;
 
-    // Prefill : two positions, talker_hidden_last and embed_talker(c0).
+    // Prefill: two positions, talker_hidden_last and embed_talker(c0).
     kv_cache_reset(kv);
     std::vector<float> prefill_input((size_t) 2 * (size_t) talker_hidden, 0.0f);
     std::memcpy(prefill_input.data(), talker_hidden_last, (size_t) talker_hidden * sizeof(float));
@@ -307,7 +305,7 @@ bool code_predictor_step(const TalkerWeights *        tw,
         out->codes[1] = cg;
     }
 
-    // Decode loop : 14 single-token steps. At step g (g=1..14) we feed
+    // Decode loop: 14 single-token steps. At step g (g=1..14) we feed
     // the embedding of the code we just sampled and read lm_head[g].
     std::vector<float> step_input((size_t) talker_hidden);
     for (int g = 1; g < n_acoustic; g++) {

@@ -1,5 +1,5 @@
 #pragma once
-// speaker-encoder-forward.h : ECAPA-TDNN forward graph in GGML.
+// speaker-encoder-forward.h: ECAPA-TDNN forward graph in GGML.
 //
 // Mirrors qwen_tts.core.models.modeling_qwen3_tts.Qwen3TTSSpeakerEncoder
 // for the single utterance unbatched path. The forward fuses the mel
@@ -16,7 +16,7 @@
 //     -> FC k=1                            [2048, 1]
 //     -> squeeze                           [2048]
 //
-// Tensor convention : [C, T] inside the graph (ne[0]=C, ne[1]=T) so that
+// Tensor convention: [C, T] inside the graph (ne[0]=C, ne[1]=T) so that
 // ggml_im2col reads each Conv1d along the time axis and ggml_mul_mat
 // contracts over the input channel axis. This matches the layout the
 // upstream PyTorch code uses after its (1, 2) transpose.
@@ -55,14 +55,14 @@ static struct ggml_tensor * spk_conv1d_same(struct ggml_context * ctx,
 
     // ggml_pad_reflect_1d pads the innermost axis ne[0]. Our temporal
     // axis is ne[1], so we transpose to bring T to ne[0], pad, and keep
-    // it that way : the im2col downstream expects ne[0]=T_pad, ne[1]=IC,
+    // it that way: the im2col downstream expects ne[0]=T_pad, ne[1]=IC,
     // which is exactly the layout we end up with here.
     struct ggml_tensor * x_t = ggml_cont(ctx, ggml_transpose(ctx, x));  // ne=(T, IC)
     if (pad > 0) {
         x_t = ggml_pad_reflect_1d(ctx, x_t, pad, pad);                  // ne=(T+2*pad, IC)
     }
 
-    // Reshape to 4D for ggml_im2col 1D : ne=(T_pad, IC, 1, 1).
+    // Reshape to 4D for ggml_im2col 1D: ne=(T_pad, IC, 1, 1).
     struct ggml_tensor * x4d = ggml_reshape_4d(ctx, x_t, x_t->ne[0], IC, 1, 1);
 
     // Dummy F32 kernel with the (K, IC) shape ggml_im2col needs to read
@@ -71,7 +71,7 @@ static struct ggml_tensor * spk_conv1d_same(struct ggml_context * ctx,
     struct ggml_tensor * dummy = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, K, IC, 1, 1);
     ggml_set_name(dummy, "spk.im2col_kernel");
 
-    // im2col with is_2D=false : the constructor declares ne[0]=IC*K and
+    // im2col with is_2D=false: the constructor declares ne[0]=IC*K and
     // ne[1]=OW, and the impl writes the buffer in (k inner, ic middle,
     // t outer) order, which matches that ne directly. A reshape_2d to
     // (IC*K, T_out) reads col_2d[ic*K + k, t], lining up with the
@@ -80,7 +80,7 @@ static struct ggml_tensor * spk_conv1d_same(struct ggml_context * ctx,
     int                  T_out = (int) col->ne[1];
     col                        = ggml_reshape_2d(ctx, col, K * IC, T_out);
 
-    // Weight reshape : [K, IC, OC] -> [K*IC, OC]. mul_mat returns [OC, T_out].
+    // Weight reshape: [K, IC, OC] -> [K*IC, OC]. mul_mat returns [OC, T_out].
     struct ggml_tensor * w2d = ggml_reshape_2d(ctx, w, K * IC, OC);
     struct ggml_tensor * y   = ggml_mul_mat(ctx, w2d, col);
     ggml_mul_mat_set_prec(y, GGML_PREC_F32);
@@ -91,7 +91,7 @@ static struct ggml_tensor * spk_conv1d_same(struct ggml_context * ctx,
     return y;
 }
 
-// TDNN block : Conv1d(same, reflect) + ReLU. Used both as the conv0
+// TDNN block: Conv1d(same, reflect) + ReLU. Used both as the conv0
 // frontend (k=5) and inside SE-Res2Net (k=1) and the MFA / ASP TDNNs.
 static struct ggml_tensor * spk_tdnn(struct ggml_context * ctx,
                                      const SpkEncTDNN &    t,
@@ -102,7 +102,7 @@ static struct ggml_tensor * spk_tdnn(struct ggml_context * ctx,
     return y;
 }
 
-// Res2Net block : split the channel axis in 8 chunks. chunk 0 passes
+// Res2Net block: split the channel axis in 8 chunks. chunk 0 passes
 // through, chunk 1 goes through TDNN[0], chunks 2..7 mix with the
 // previous chunk output before going through TDNN[i-1]. The 7 TDNN
 // branches share dilation but operate on hidden / 8 channels each.
@@ -152,7 +152,7 @@ static struct ggml_tensor * spk_res2net(struct ggml_context * ctx,
     return acc;
 }
 
-// Squeeze and Excitation : compute the temporal mean per channel,
+// Squeeze and Excitation: compute the temporal mean per channel,
 // project down to se_c with a 1x1 conv + ReLU, project back up to
 // out_c with a 1x1 conv + sigmoid, then scale the input by the gate
 // broadcast over T.
@@ -180,7 +180,7 @@ static struct ggml_tensor * spk_se(struct ggml_context * ctx, const SpkEncSE & s
     return y;
 }
 
-// SE-Res2Net block : tdnn1 (1x1) -> Res2Net -> tdnn2 (1x1) -> SE plus
+// SE-Res2Net block: tdnn1 (1x1) -> Res2Net -> tdnn2 (1x1) -> SE plus
 // a residual add over the whole stack.
 static struct ggml_tensor * spk_block(struct ggml_context * ctx,
                                       const SpkEncBlock &   blk,
@@ -194,7 +194,7 @@ static struct ggml_tensor * spk_block(struct ggml_context * ctx,
     return ggml_add(ctx, h, residual);
 }
 
-// Attentive Statistical Pooling : compute global mean and std along T,
+// Attentive Statistical Pooling: compute global mean and std along T,
 // concat with x, run an attention TDNN + tanh + 1x1 conv, softmax along
 // T, recompute weighted mean and std, return the [2C, 1] concat.
 //
@@ -205,7 +205,7 @@ static struct ggml_tensor * spk_asp(struct ggml_context * ctx, const SpkEncASP &
     const int T = (int) x->ne[1];
 
     // Mean and std over T axis. The mask reduction is uniform 1/T.
-    // mean : [C, 1]
+    // mean: [C, 1]
     struct ggml_tensor * x_t  = ggml_cont(ctx, ggml_transpose(ctx, x));
     struct ggml_tensor * mean = ggml_mean(ctx, x_t);
     mean                      = ggml_cont(ctx, ggml_transpose(ctx, mean));
@@ -226,9 +226,9 @@ static struct ggml_tensor * spk_asp(struct ggml_context * ctx, const SpkEncASP &
     struct ggml_tensor * cat   = ggml_concat(ctx, x, mean_T, 0);
     cat                        = ggml_concat(ctx, cat, std_T, 0);  // [3C, T]
 
-    // Attention TDNN : 3C -> attn_c, ReLU, then tanh, then 1x1 conv
+    // Attention TDNN: 3C -> attn_c, ReLU, then tanh, then 1x1 conv
     // attn_c -> C. Upstream applies tanh on the TDNN output before the
-    // second conv ; the TDNN itself already runs ReLU so the order is
+    // second conv; the TDNN itself already runs ReLU so the order is
     // ReLU then tanh which is unusual but mirrored faithfully.
     struct ggml_tensor * a = spk_tdnn(ctx, asp.tdnn, cat, 1);
     a                      = ggml_tanh(ctx, a);
@@ -239,7 +239,7 @@ static struct ggml_tensor * spk_asp(struct ggml_context * ctx, const SpkEncASP &
     struct ggml_tensor * w_t = ggml_soft_max(ctx, a_t);
     struct ggml_tensor * w   = ggml_cont(ctx, ggml_transpose(ctx, w_t));  // [C, T]
 
-    // Weighted mean : sum(w * x) over T, w already sums to 1 over T.
+    // Weighted mean: sum(w * x) over T, w already sums to 1 over T.
     struct ggml_tensor * wx     = ggml_mul(ctx, w, x);
     struct ggml_tensor * wx_t   = ggml_cont(ctx, ggml_transpose(ctx, wx));
     // ggml_mean averages over ne[0]=T, giving 1/T scaling. We want the
@@ -249,7 +249,7 @@ static struct ggml_tensor * spk_asp(struct ggml_context * ctx, const SpkEncASP &
     w_mean                      = ggml_scale(ctx, w_mean, (float) T);
     w_mean                      = ggml_cont(ctx, ggml_transpose(ctx, w_mean));  // [C, 1]
 
-    // Weighted std : sum(w * (x - w_mean)^2) over T.
+    // Weighted std: sum(w * (x - w_mean)^2) over T.
     struct ggml_tensor * w_mean_T = ggml_repeat(ctx, w_mean, x);
     struct ggml_tensor * dev      = ggml_sub(ctx, x, w_mean_T);
     struct ggml_tensor * w_var_in = ggml_mul(ctx, w, ggml_sqr(ctx, dev));
@@ -285,7 +285,7 @@ static struct ggml_tensor * spk_asp(struct ggml_context * ctx, const SpkEncASP &
 //   block3_out     optional. Post third SE-Res2Net block output [512, T].
 //   mfa_out        optional. Post multi-layer feature aggregation [1536, T].
 //   asp_out        optional. Post attentive statistical pooling [3072, 1].
-// Output : [enc_dim] f32, the speaker embedding (typically 2048 dims).
+// Output: [enc_dim] f32, the speaker embedding (typically 2048 dims).
 static struct ggml_tensor * speaker_encoder_forward(struct ggml_context *         ctx,
                                                     const SpeakerEncoderWeights * sw,
                                                     struct ggml_tensor *          audio_padded,
@@ -300,14 +300,14 @@ static struct ggml_tensor * speaker_encoder_forward(struct ggml_context *       
                                                     struct ggml_tensor **         block3_out   = NULL,
                                                     struct ggml_tensor **         mfa_out      = NULL,
                                                     struct ggml_tensor **         asp_out      = NULL) {
-    // Mel : [n_mels=128, T_frames]
+    // Mel: [n_mels=128, T_frames]
     struct ggml_tensor * mel =
         audio_mel_build_graph(ctx, audio_padded, hann, dft_real, dft_imag, mel_basis, mel_cfg, mag_out);
     if (mel_out) {
         *mel_out = mel;
     }
 
-    // Frontend conv0 TDNN k=5 + ReLU : 128 -> 512, T preserved.
+    // Frontend conv0 TDNN k=5 + ReLU: 128 -> 512, T preserved.
     struct ggml_tensor * h = spk_tdnn(ctx, sw->conv0, mel, 1);
     if (frontend_out) {
         *frontend_out = h;
@@ -321,7 +321,7 @@ static struct ggml_tensor * speaker_encoder_forward(struct ggml_context *       
         *block3_out = b3;
     }
 
-    // Multi-layer feature aggregation : cat blk1..3 then 1x1 TDNN + ReLU.
+    // Multi-layer feature aggregation: cat blk1..3 then 1x1 TDNN + ReLU.
     struct ggml_tensor * cat = ggml_concat(ctx, b1, b2, 0);
     cat                      = ggml_concat(ctx, cat, b3, 0);    // [1536, T]
     struct ggml_tensor * mfa = spk_tdnn(ctx, sw->mfa, cat, 1);  // [1536, T]
@@ -329,13 +329,13 @@ static struct ggml_tensor * speaker_encoder_forward(struct ggml_context *       
         *mfa_out = mfa;
     }
 
-    // Attentive statistical pooling : [1536, T] -> [3072, 1].
+    // Attentive statistical pooling: [1536, T] -> [3072, 1].
     struct ggml_tensor * stats = spk_asp(ctx, sw->asp, mfa);
     if (asp_out) {
         *asp_out = stats;
     }
 
-    // Final FC k=1 : [3072, 1] -> [enc_dim, 1].
+    // Final FC k=1: [3072, 1] -> [enc_dim, 1].
     struct ggml_tensor * emb = spk_conv1d_same(ctx, stats, sw->fc_w, sw->fc_b, 1);
 
     // Squeeze T axis, return [enc_dim]. ggml_cont is required so the sched

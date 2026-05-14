@@ -1,11 +1,11 @@
 #pragma once
 // audio-postproc.h: TTS waveform post-processing
 //
-// Generic post-processing for neural TTS output : silence trimming
+// Generic post-processing for neural TTS output: silence trimming
 // (pydub-strict bit-for-bit), fade-in/out, padding. Public functions take
 // and return float32 mono PCM in [-1, 1] at the pipeline sample rate.
 // Internal silence detection runs on int16 samples to match pydub.
-// Math reference : omnivoice/utils/audio.py (1:1 port).
+// Math reference: omnivoice/utils/audio.py (1:1 port).
 
 #include <algorithm>
 #include <cmath>

@@ -1,5 +1,5 @@
 #pragma once
-// tokenizer-transformer.h : 8-layer Qwen3-style local-causal transformer
+// tokenizer-transformer.h: 8-layer Qwen3-style local-causal transformer
 // for the Qwen3-TTS 12Hz tokenizer decoder.
 //
 // Hidden size 512, head_dim 64, 16 query and 16 KV heads (no GQA), FFN
@@ -166,7 +166,7 @@ static void qwen_tokenizer_transformer_free(QwenTokenizerTransformer * tr) {
 // Fill a [T, T] f32 mask with 0 where attention is allowed and -inf
 // elsewhere. Storage is row-major with k (key index) on the fast axis :
 // dst[q * T + k] is the additive bias for query q attending to key k.
-// Causal sliding window : mask[k, q] = 0 if (k <= q AND q - k < window),
+// Causal sliding window: mask[k, q] = 0 if (k <= q AND q - k < window),
 // else -inf.
 static void qwen_build_causal_sliding_mask(int T, int sliding_window, std::vector<float> & dst) {
     dst.assign((size_t) T * (size_t) T, -INFINITY);
@@ -188,7 +188,7 @@ static void qwen_build_positions(int T, std::vector<int32_t> & dst) {
     }
 }
 
-// One transformer layer : attention block then MLP block, both with
+// One transformer layer: attention block then MLP block, both with
 // pre-RMSNorm, post-LayerScale and residual connection.
 static struct ggml_tensor * qwen_transformer_layer_forward(struct ggml_context *            ctx,
                                                            const QwenTokenizerTransformer * tr,
@@ -202,7 +202,7 @@ static struct ggml_tensor * qwen_transformer_layer_forward(struct ggml_context *
     int n_kv      = tr->num_kv_heads;
     int hd        = tr->head_dim;
 
-    // Attention block : pre-RMSNorm + project Q/K/V + RoPE + scaled dot product
+    // Attention block: pre-RMSNorm + project Q/K/V + RoPE + scaled dot product
     // + softmax with causal sliding mask + V combine + o_proj.
     struct ggml_tensor * ln1 = ggml_rms_norm(ctx, x, tr->rms_norm_eps);
     ln1                      = ggml_mul(ctx, ln1, layer.input_norm_w);
@@ -220,19 +220,19 @@ static struct ggml_tensor * qwen_transformer_layer_forward(struct ggml_context *
     k = ggml_rope_ext(ctx, k, positions, NULL, hd, GGML_ROPE_TYPE_NEOX, 0, tr->rope_theta, 1.0f, 0.0f, 1.0f, 0.0f,
                       0.0f);
 
-    // Permute to head-as-batch layout : [hd, T, n_heads]
+    // Permute to head-as-batch layout: [hd, T, n_heads]
     struct ggml_tensor * q_p = ggml_cont(ctx, ggml_permute(ctx, q, 0, 2, 1, 3));
     struct ggml_tensor * k_p = ggml_cont(ctx, ggml_permute(ctx, k, 0, 2, 1, 3));
     struct ggml_tensor * v_p = ggml_permute(ctx, v, 1, 2, 0, 3);  // [T, n_kv, hd] for V mul_mat
     v_p                      = ggml_cont(ctx, v_p);
 
-    // Scores : mul_mat(K, Q) -> [T_k, T_q, n_heads]
+    // Scores: mul_mat(K, Q) -> [T_k, T_q, n_heads]
     struct ggml_tensor * scores = ggml_mul_mat(ctx, k_p, q_p);
 
     float scale = 1.0f / sqrtf((float) hd);
     scores      = ggml_soft_max_ext(ctx, scores, mask, scale, 0.0f);
 
-    // Attention output : mul_mat(V_T, scores) -> [hd, T_q, n_heads]
+    // Attention output: mul_mat(V_T, scores) -> [hd, T_q, n_heads]
     // V_T has T_k as ne[0], hd as ne[1], n_heads as ne[2].
     struct ggml_tensor * attn = ggml_mul_mat(ctx, v_p, scores);
 
@@ -246,7 +246,7 @@ static struct ggml_tensor * qwen_transformer_layer_forward(struct ggml_context *
     o = ggml_mul(ctx, o, layer.attn_scale);
     x = ggml_add(ctx, x, o);
 
-    // MLP block : pre-RMSNorm + SwiGLU + LayerScale + residual.
+    // MLP block: pre-RMSNorm + SwiGLU + LayerScale + residual.
     struct ggml_tensor * ln2 = ggml_rms_norm(ctx, x, tr->rms_norm_eps);
     ln2                      = ggml_mul(ctx, ln2, layer.post_attn_norm_w);
 
@@ -263,10 +263,10 @@ static struct ggml_tensor * qwen_transformer_layer_forward(struct ggml_context *
     return x;
 }
 
-// Full forward pass : input_proj, 8 layers, final norm, output_proj.
+// Full forward pass: input_proj, 8 layers, final norm, output_proj.
 //
 // x         : [latent_dim, T] f32
-// positions : [T] i32
+// positions: [T] i32
 // mask      : [T, T] f32, additive (-inf where masked)
 // returns   : [latent_dim, T] f32
 static struct ggml_tensor * qwen_tokenizer_transformer_forward(struct ggml_context *            ctx,
@@ -276,7 +276,7 @@ static struct ggml_tensor * qwen_tokenizer_transformer_forward(struct ggml_conte
                                                                struct ggml_tensor *             mask) {
     int T = (int) x->ne[1];
 
-    // input_proj : [latent_dim, T] -> [hidden, T]
+    // input_proj: [latent_dim, T] -> [hidden, T]
     struct ggml_tensor * h = ggml_mul_mat(ctx, tr->input_proj_w, x);
     h                      = ggml_add(ctx, h, tr->input_proj_b);
 
@@ -287,7 +287,7 @@ static struct ggml_tensor * qwen_tokenizer_transformer_forward(struct ggml_conte
     h = ggml_rms_norm(ctx, h, tr->rms_norm_eps);
     h = ggml_mul(ctx, h, tr->norm_w);
 
-    // output_proj : [hidden, T] -> [latent_dim, T]
+    // output_proj: [hidden, T] -> [latent_dim, T]
     h = ggml_mul_mat(ctx, tr->output_proj_w, h);
     h = ggml_add(ctx, h, tr->output_proj_b);
 

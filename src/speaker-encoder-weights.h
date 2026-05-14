@@ -1,5 +1,5 @@
 #pragma once
-// speaker-encoder-weights.h : ECAPA-TDNN x-vector extractor used by the
+// speaker-encoder-weights.h: ECAPA-TDNN x-vector extractor used by the
 // Base checkpoint to condition the Talker on a reference voice.
 //
 // Topology (from qwen_tts.core.models.modeling_qwen3_tts) :
@@ -15,7 +15,7 @@
 // quantizing because should_quantize keeps spk_enc as is (small
 // channel counts make quantization meaningless here).
 //
-// Constants : enc_dim 2048 (size of the speaker embedding fed into
+// Constants: enc_dim 2048 (size of the speaker embedding fed into
 // the codec_prefill slot), input mel_dim 128, ECAPA hidden 512,
 // res2net scale 8 -> 7 dilated TDNN branches, se hidden 128,
 // asp attention 128.
@@ -31,7 +31,7 @@
 #include <string>
 #include <vector>
 
-// Initial TDNN block : Conv1d(in=128, out=512, k=5, padding=same, reflect)
+// Initial TDNN block: Conv1d(in=128, out=512, k=5, padding=same, reflect)
 // followed by ReLU. Stored as 3D tensor [k, in_c, out_c] in the GGUF.
 struct SpkEncTDNN {
     struct ggml_tensor * weight;  // [k, in_c, out_c]
@@ -41,7 +41,7 @@ struct SpkEncTDNN {
     int                  out_c;
 };
 
-// Squeeze-Excitation attention : conv1 (out -> se), conv2 (se -> out),
+// Squeeze-Excitation attention: conv1 (out -> se), conv2 (se -> out),
 // k=1 padding=same. Operates on the temporal mean of the input then
 // broadcasts a sigmoid gate back over the time axis.
 struct SpkEncSE {
@@ -51,7 +51,7 @@ struct SpkEncSE {
     struct ggml_tensor * conv2_b;  // [out_c]
 };
 
-// Res2Net branch : 7 dilated TDNN k=3 conv1d, dilation comes from the
+// Res2Net branch: 7 dilated TDNN k=3 conv1d, dilation comes from the
 // parent SE-Res2Net block. We keep flat arrays since enc_res2net_scale
 // is 8 (which yields scale - 1 = 7 branches).
 struct SpkEncRes2Net {
@@ -59,7 +59,7 @@ struct SpkEncRes2Net {
     struct ggml_tensor * bias[7];    // each [out_c/8]
 };
 
-// SE-Res2Net block : tdnn1 (k=1) -> Res2Net (k=3, dil=d) -> tdnn2 (k=1)
+// SE-Res2Net block: tdnn1 (k=1) -> Res2Net (k=3, dil=d) -> tdnn2 (k=1)
 // -> SE attention, plus a residual add over the whole stack.
 struct SpkEncBlock {
     SpkEncTDNN    tdnn1;
@@ -69,7 +69,7 @@ struct SpkEncBlock {
     int           dilation;
 };
 
-// Attentive Statistical Pooling : tdnn maps from 3*1536 to 128 (channels
+// Attentive Statistical Pooling: tdnn maps from 3*1536 to 128 (channels
 // concat of [x, mean, std]), conv maps 128 back to 1536. The mask
 // branch reduces to a no-op for unbatched single-utterance inference,
 // which is the only path the C++ side exposes.
@@ -156,7 +156,7 @@ static bool speaker_encoder_weights_load(SpeakerEncoderWeights * sw, const GGUFM
     sw->se_channels   = 128;
     sw->res2net_scale = 8;
 
-    // Probe : Base GGUFs ship the speaker encoder, CustomVoice and
+    // Probe: Base GGUFs ship the speaker encoder, CustomVoice and
     // VoiceDesign do not. A missing conv0.weight aborts cleanly.
     if (gguf_find_tensor(gf.gguf, "spk_enc.conv0.weight") < 0) {
         fprintf(stderr, "[SpeakerEncoder] No spk_enc.conv0.weight, base/clone mode unavailable\n");
@@ -165,7 +165,7 @@ static bool speaker_encoder_weights_load(SpeakerEncoderWeights * sw, const GGUFM
         return true;
     }
 
-    // Roughly 80 tensors total : 1 conv0 + 3 * (2 tdnn + 7 res2net + 4 se) + 1 mfa
+    // Roughly 80 tensors total: 1 conv0 + 3 * (2 tdnn + 7 res2net + 4 se) + 1 mfa
     // + asp.tdnn + asp.conv + fc, with weight + bias each. Allocate 100 slots
     // for safety.
     WeightCtx wctx;

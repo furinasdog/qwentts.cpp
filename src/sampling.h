@@ -76,7 +76,7 @@ static inline void apply_repetition_penalty(float *         logits,
 //   5. softmax
 //   6. multinomial via philox_uniform_fill(seed, philox_subseq, 0)
 //
-// Greedy path : temperature <= 0 returns argmax over the suppressed
+// Greedy path: temperature <= 0 returns argmax over the suppressed
 // logits, no rep_pen, no philox draw.
 //
 // Buffers are thread_local to avoid alloc per token.
@@ -154,7 +154,7 @@ static int sample_top_k_p(float *         logits,
         if (K > 0) {
             std::sort(sorted_buf.begin(), sorted_buf.end(),
                       [](const TokenProb & a, const TokenProb & b) { return a.prob > b.prob; });
-            // HF convention : keep tokens until the cumulative probability
+            // HF convention: keep tokens until the cumulative probability
             // crosses top_p, drop the rest. Test before accumulate so the
             // first crossing entry is kept.
             float cum = 0.0f;

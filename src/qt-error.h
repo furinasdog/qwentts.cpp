@@ -1,5 +1,5 @@
 #pragma once
-// qt-error.h : internal helpers backing the public qwen_last_error
+// qt-error.h: internal helpers backing the public qwen_last_error
 // entry and the qwen_log callback routing.
 //
 // Not part of the public ABI. Translation units that emit user-facing
@@ -10,11 +10,11 @@
 //
 // Storage is thread_local so concurrent qwen_synthesize calls on
 // different threads never race on each other's messages. The setter is
-// variadic with printf semantics ; messages longer than the internal
+// variadic with printf semantics; messages longer than the internal
 // buffer are truncated, never split. Passing NULL as fmt clears the
 // slot.
 //
-// qt_throw is the load-path counterpart : functions deep inside the
+// qt_throw is the load-path counterpart: functions deep inside the
 // GGUF reader and the codec load chain cannot return false up dozens
 // of call sites without a massive cascade. They throw a
 // std::runtime_error instead, which the ABI boundary entries
@@ -33,7 +33,7 @@
 #include <cstdarg>
 
 // Internal log level alias. Same values, same layout as the public
-// qwen_log_level enum : a single underlying type means a single log
+// qwen_log_level enum: a single underlying type means a single log
 // callback installed through qwen_log_set routes every diagnostic
 // without any cast or translation.
 typedef enum qwen_log_level qt_log_level;
@@ -64,7 +64,7 @@ void qt_set_error_v(const char * fmt, va_list ap);
 
 // Routes a formatted message at the requested level to the installed
 // callback, or to stderr when none is set. The message is the full
-// line without trailing newline ; routing layers add their own framing.
+// line without trailing newline; routing layers add their own framing.
 void qt_log(qt_log_level level, const char * fmt, ...)
 #if defined(__GNUC__) || defined(__clang__)
     __attribute__((format(printf, 2, 3)))

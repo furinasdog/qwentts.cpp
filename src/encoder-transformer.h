@@ -136,7 +136,7 @@ static void qwen_encoder_transformer_free(QwenEncoderTransformer * tr) {
 }
 
 // Build a [T, T] additive causal mask (0 where allowed, -inf where masked).
-// Pure causal : k <= q. The upstream config carries a sliding_window
+// Pure causal: k <= q. The upstream config carries a sliding_window
 // value but neither MimiAttention's eager forward nor MimiTransformerModel
 // (create_causal_mask) ever apply it. The Qwen3TTS encoder inherits this
 // convention, so we mirror it bit for bit here.
@@ -160,7 +160,7 @@ static void qwen_encoder_build_positions(int T, std::vector<int32_t> & dst) {
 // q/k/v/o biases, MLP with fc1 -> GELU -> fc2 (no SwiGLU), LayerScale on
 // both residual paths.
 //   x         : [hidden, T] f32 C-first
-//   positions : [T] i32
+//   positions: [T] i32
 //   mask      : [T, T] f32 additive
 // Returns [hidden, T] f32 C-first.
 static struct ggml_tensor * qwen_encoder_transformer_layer_forward(struct ggml_context *               ctx,
@@ -230,7 +230,7 @@ static struct ggml_tensor * qwen_encoder_transformer_layer_forward(struct ggml_c
 // Full encoder transformer forward. No top-level input_proj or output_proj
 // brackets: the SEANet output already has hidden_size channels.
 //   x         : [hidden, T] f32 C-first
-//   positions : [T] i32
+//   positions: [T] i32
 //   mask      : [T, T] f32 additive
 // Returns [hidden, T] f32 C-first.
 static struct ggml_tensor * qwen_encoder_transformer_forward(struct ggml_context *          ctx,

@@ -1,7 +1,7 @@
 /* tests/abi-c.c : link-only ABI smoke test for qwen.h.
  *
  * Compiled in pure C99 with -Wall -Werror -pedantic. The purpose of this
- * test is NOT to run a full synthesis (no GGUF loaded, no model required) ;
+ * test is NOT to run a full synthesis (no GGUF loaded, no model required);
  * it is to guarantee at every build that :
  *
  *   1. qwen.h parses with a C compiler (no <cstdio>, no std::*, no
@@ -46,7 +46,7 @@ static void stub_log(enum qwen_log_level level, const char * msg, void * user_da
 int main(void) {
     /* Static version string, always reachable. */
     const char * version = qwen_version();
-    printf("qwen ABI probe : %s\n", version);
+    printf("[Probe] %s\n", version);
 
     /* Default-initialise the public structs from C. */
     struct qwen_init_params iparams;
@@ -57,11 +57,11 @@ int main(void) {
 
     /* Sanity-check a few default values, including the abi_version. */
     if (params.max_new_tokens != 2048 || params.temperature != 0.9f) {
-        fprintf(stderr, "ABI probe : default values do not match\n");
+        fprintf(stderr, "[Probe] default values do not match\n");
         return 1;
     }
     if (iparams.abi_version != QWEN_ABI_VERSION || params.abi_version != QWEN_ABI_VERSION) {
-        fprintf(stderr, "ABI probe : abi_version not set by qwen_*_default_params\n");
+        fprintf(stderr, "[Probe] abi_version not set by qwen_*_default_params\n");
         return 1;
     }
 
@@ -80,7 +80,7 @@ int main(void) {
      * but the linker must resolve every name to satisfy the call. */
     struct qwen_context * dummy = qwen_init(NULL);
     if (dummy != NULL) {
-        fprintf(stderr, "ABI probe : qwen_init(NULL) was supposed to return NULL\n");
+        fprintf(stderr, "[Probe] qwen_init(NULL) was supposed to return NULL\n");
         qwen_free(dummy);
         return 2;
     }
@@ -91,23 +91,23 @@ int main(void) {
      * check the first byte to confirm an error was actually recorded. */
     const char * err = qwen_last_error();
     if (err == NULL || err[0] == '\0') {
-        fprintf(stderr, "ABI probe : qwen_last_error() empty after a known failure\n");
+        fprintf(stderr, "[Probe] qwen_last_error() empty after a known failure\n");
         return 5;
     }
 
     /* The same failure must have surfaced through the log callback at
      * ERROR level. */
     if (g_log_lines == 0) {
-        fprintf(stderr, "ABI probe : qwen_log_set callback never invoked\n");
+        fprintf(stderr, "[Probe] qwen_log_set callback never invoked\n");
         return 6;
     }
     if (g_last_log_level != QWEN_LOG_ERROR) {
-        fprintf(stderr, "ABI probe : last log level was %d, expected %d\n", (int) g_last_log_level,
+        fprintf(stderr, "[Probe] last log level was %d, expected %d\n", (int) g_last_log_level,
                 (int) QWEN_LOG_ERROR);
         return 7;
     }
-    printf("qwen ABI probe : qwen_log_set routed %d line(s), last : '%s'\n", g_log_lines, g_last_log_msg);
-    printf("qwen ABI probe : qwen_last_error reads '%s'\n", err);
+    printf("[Probe] qwen_log_set routed %d line(s), last: '%s'\n", g_log_lines, g_last_log_msg);
+    printf("[Probe] qwen_last_error reads '%s'\n", err);
 
     /* abi_version validation : a struct claiming a future ABI must be
      * rejected up front, before any allocation. Both paths are filled
@@ -120,14 +120,14 @@ int main(void) {
     future_iparams.abi_version = QWEN_ABI_VERSION + 1;
     struct qwen_context * rejected = qwen_init(&future_iparams);
     if (rejected != NULL) {
-        fprintf(stderr, "ABI probe : qwen_init accepted a future abi_version\n");
+        fprintf(stderr, "[Probe] qwen_init accepted a future abi_version\n");
         qwen_free(rejected);
         return 8;
     }
 
     enum qwen_status rc = qwen_synthesize(NULL, &params, &audio);
     if (rc != QWEN_STATUS_INVALID_PARAMS) {
-        fprintf(stderr, "ABI probe : qwen_synthesize(NULL) returned %d, expected %d\n", (int) rc,
+        fprintf(stderr, "[Probe] qwen_synthesize(NULL) returned %d, expected %d\n", (int) rc,
                 (int) QWEN_STATUS_INVALID_PARAMS);
         return 3;
     }

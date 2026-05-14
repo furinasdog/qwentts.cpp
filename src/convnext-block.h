@@ -1,5 +1,5 @@
 #pragma once
-// convnext-block.h : 2-block upsample stage for the Qwen3-TTS 12Hz
+// convnext-block.h: 2-block upsample stage for the Qwen3-TTS 12Hz
 // tokenizer decoder.
 //
 // Each block is a CausalTransConv1d (kernel 2, stride 2) followed by a
@@ -122,7 +122,7 @@ static void qwen_upsample_stage_free(QwenUpsampleStage * stage) {
 }
 
 // One ConvNeXt block forward.
-//   x : [T, C] f32 T-first
+//   x: [T, C] f32 T-first
 // returns [T, C] f32 T-first
 static struct ggml_tensor * qwen_convnext_block_forward(struct ggml_context *     ctx,
                                                         const QwenConvNeXtBlock & block,
@@ -133,7 +133,7 @@ static struct ggml_tensor * qwen_convnext_block_forward(struct ggml_context *   
 
     struct ggml_tensor * residual = x;
 
-    // dwconv : depthwise causal Conv1d. ggml_conv_1d_dw expects [T, C, B=1].
+    // dwconv: depthwise causal Conv1d. ggml_conv_1d_dw expects [T, C, B=1].
     // Pre-pad left by (kernel-1) zeros for causal behavior, no internal padding.
     struct ggml_tensor * y = ggml_reshape_3d(ctx, x, T, C, 1);
     y                      = ggml_pad_ext(ctx, y, kernel - 1, 0, 0, 0, 0, 0, 0, 0);
@@ -144,20 +144,20 @@ static struct ggml_tensor * qwen_convnext_block_forward(struct ggml_context *   
         y                        = ggml_add(ctx, y, b2d);
     }
 
-    // LayerNorm wants the channel dim on ne[0] : transpose to [C, T].
+    // LayerNorm wants the channel dim on ne[0]: transpose to [C, T].
     y = ggml_cont(ctx, ggml_transpose(ctx, y));
     y = ggml_norm(ctx, y, 1e-6f);
     y = ggml_mul(ctx, y, block.norm_w);
     y = ggml_add(ctx, y, block.norm_b);
 
-    // pwconv1 : Linear C -> 4*C. mul_mat contracts ne[0]=C of weight against
+    // pwconv1: Linear C -> 4*C. mul_mat contracts ne[0]=C of weight against
     // ne[0]=C of input.
     y = ggml_mul_mat(ctx, block.pwconv1_w, y);
     y = ggml_add(ctx, y, block.pwconv1_b);
 
     y = ggml_gelu(ctx, y);
 
-    // pwconv2 : Linear 4*C -> C
+    // pwconv2: Linear 4*C -> C
     y = ggml_mul_mat(ctx, block.pwconv2_w, y);
     y = ggml_add(ctx, y, block.pwconv2_b);
 
@@ -171,8 +171,8 @@ static struct ggml_tensor * qwen_convnext_block_forward(struct ggml_context *   
     return y;
 }
 
-// Full upsample stage forward : 2 (CausalTransConv + ConvNeXt) blocks.
-//   x : [T, C] f32 T-first
+// Full upsample stage forward: 2 (CausalTransConv + ConvNeXt) blocks.
+//   x: [T, C] f32 T-first
 // returns [T * 4, C] f32 T-first
 //
 // The top-level upsample stage uses kernel == stride (no causal trim).

@@ -1,4 +1,4 @@
-// quantize.cpp : GGUF requantizer for qwen
+// quantize.cpp: GGUF requantizer for qwen
 // Reads BF16 GGUF, writes quantized GGUF with mixed-precision K-quant policy.
 // Policy mirrors llama-quantize: important tensors (v_proj, down_proj) get
 // bumped in S/M variants, embed_tokens always Q6_K, norms promoted to F32.
@@ -84,7 +84,7 @@ static bool is_important_l(const char * name) {
 
 // Tensors accessed via ggml_get_rows (text token embeddings, audio token
 // embeddings, codebook lookups). These must use a type the CUDA get_rows
-// kernel supports : F32, F16, BF16, Q4_0, Q4_1, Q5_0, Q5_1, Q8_0. K-quants
+// kernel supports: F32, F16, BF16, Q4_0, Q4_1, Q5_0, Q5_1, Q8_0. K-quants
 // are NOT supported.
 //
 // In the qwen3-tts naming convention :
@@ -103,7 +103,7 @@ static bool is_embed(const char * name) {
 // Should this tensor be quantized at all?
 //
 // Single source of truth for the quantization policy. Applies to EVERY
-// variant (BF16, Q8_0, Q6_K, Q5_K_M, Q4_K_M, ...) : tensors that return
+// variant (BF16, Q8_0, Q6_K, Q5_K_M, Q4_K_M, ...): tensors that return
 // false here keep their source dtype (F32) regardless of the requested
 // type. Conv weights pass through the main loop and fall back to F16 when
 // the row width does not divide the variant block size (kernel K=7,3,1,...).
@@ -117,7 +117,7 @@ static bool is_embed(const char * name) {
 //   tok_enc.vq_*.input_proj      linear wrapping the RVQ encode loop
 //   tok_enc.vq_*.output_proj     linear wrapping the RVQ encode loop
 //   tok_dec.vq_*.output_proj     linear wrapping the RVQ decode loop
-// Nearest-neighbor lookup is sensitive to per-row quantization noise ;
+// Nearest-neighbor lookup is sensitive to per-row quantization noise;
 // even BF16 destroys the mantissa enough to mis-select codes and break
 // voice cloning. Same philosophy as acestep.cpp keeping VAE-critical
 // paths in full precision.
@@ -140,7 +140,7 @@ static bool should_quantize(const char * name, int n_dims, const char * arch) {
     if (strstr(name, "null_condition_emb")) {
         return false;
     }
-    // Snake activation parameters : stored as per-channel floats, are
+    // Snake activation parameters: stored as per-channel floats, are
     // activation parameters, not weights. The DAC loaders widen them to
     // F32 on the backend with a reciprocal transform, no other dtype
     // path. Keep them source-dtype in every variant. Both the legacy
@@ -151,9 +151,9 @@ static bool should_quantize(const char * name, int n_dims, const char * arch) {
         strstr(name, ".snake1.alpha") || strstr(name, ".snake2.alpha")) {
         return false;
     }
-    // RVQ codebooks and the linear projections wrapping them : nearest
+    // RVQ codebooks and the linear projections wrapping them: nearest
     // neighbor lookup is sensitive to per-row quantization noise. Q8_0
-    // and K-quants break reference audio encoding and tank voice cloning ;
+    // and K-quants break reference audio encoding and tank voice cloning;
     // BF16 already loses enough mantissa to drift codes. Keep at F32 in
     // every variant.
     if (strstr(name, "tok_enc.vq_") || strstr(name, "tok_dec.vq_")) {
@@ -377,7 +377,7 @@ int main(int argc, char ** argv) {
         bool can_convert = (t->type == GGML_TYPE_BF16 || t->type == GGML_TYPE_F16 || t->type == GGML_TYPE_F32);
         bool aligned     = (t->ne[0] % ggml_blck_size(target) == 0);
 
-        // Conv kernels (K=7,3,1,...) cannot fit a block-quant row : fall back
+        // Conv kernels (K=7,3,1,...) cannot fit a block-quant row: fall back
         // to F16. F16 has no block size, 10-bit mantissa beats BF16 (7) and
         // Q* effective on these weights, and gf_load_conv on the C++ side
         // loads every conv kernel as F16 regardless of source dtype.

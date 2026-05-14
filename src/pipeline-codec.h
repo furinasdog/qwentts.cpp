@@ -89,7 +89,7 @@ std::vector<float> pipeline_codec_decode(PipelineCodec * pc, const int32_t * cod
 //   audio    : [n_samples] f32 mono 24 kHz. Must be a multiple of
 //              QWEN_TOKENIZER_HOP_LENGTH (1920); the caller is expected
 //              to pad with zeros if needed.
-//   dump_dir : optional path. When non NULL, dumps the SEANet, encoder
+//   dump_dir: optional path. When non NULL, dumps the SEANet, encoder
 //              transformer and post-downsample (pre-FSQ latents) buffers
 //              into seanet-out.bin, enc-transformer-out.bin and
 //              codec-pre-fsq.bin under that directory. Quiet otherwise.

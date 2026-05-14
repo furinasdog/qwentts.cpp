@@ -1,5 +1,5 @@
 #pragma once
-// audio-mel.h : log mel spectrogram extractor matching Qwen3TTS upstream.
+// audio-mel.h: log mel spectrogram extractor matching Qwen3TTS upstream.
 //
 // Pipeline mirrored from qwen_tts/core/models/modeling_qwen3_tts.py
 // mel_spectrogram() at lines 399 to 464 :
@@ -13,7 +13,7 @@
 // Spec for the speaker encoder path :
 //   sr=24000, n_fft=1024, hop=256, n_mels=128, fmin=0, fmax=12000
 //
-// GGML strategy : no native FFT op, so the DFT is folded into two
+// GGML strategy: no native FFT op, so the DFT is folded into two
 // real matmuls. We precompute on CPU two F32 matrices :
 //   dft_real [n_freq, n_fft]  with cos(2 pi k n / n_fft)
 //   dft_imag [n_freq, n_fft]  with -sin(2 pi k n / n_fft)
@@ -39,7 +39,7 @@ struct AudioMelConfig {
     float fmax;
 };
 
-// CPU side constants : Hann window, DFT real/imag matrices, mel filter.
+// CPU side constants: Hann window, DFT real/imag matrices, mel filter.
 // Allocated once per AudioMelConfig and uploaded to the backend as
 // regular ggml tensors during graph build.
 struct AudioMelConstants {
@@ -53,7 +53,7 @@ struct AudioMelConstants {
 
 // Slaney mel scale, the default of librosa.filters.mel.
 static inline float audio_mel_hz_to_mel(float hz) {
-    // Slaney : linear below 1000 Hz, log above.
+    // Slaney: linear below 1000 Hz, log above.
     const float f_min       = 0.0f;
     const float f_sp        = 200.0f / 3.0f;
     const float min_log_hz  = 1000.0f;
@@ -84,7 +84,7 @@ static void audio_mel_compute_constants(const AudioMelConfig & cfg, AudioMelCons
     c.cfg    = cfg;
     c.n_freq = cfg.n_fft / 2 + 1;
 
-    // Hann periodic : 0.5 * (1 - cos(2 pi i / N)) for i in [0, N).
+    // Hann periodic: 0.5 * (1 - cos(2 pi i / N)) for i in [0, N).
     c.hann.assign(cfg.n_fft, 0.0f);
     for (int i = 0; i < cfg.n_fft; i++) {
         c.hann[i] = 0.5f * (1.0f - (float) std::cos(2.0 * M_PI * (double) i / (double) cfg.n_fft));
@@ -102,7 +102,7 @@ static void audio_mel_compute_constants(const AudioMelConfig & cfg, AudioMelCons
         }
     }
 
-    // Slaney mel filterbank : n_mels triangular filters between fmin and
+    // Slaney mel filterbank: n_mels triangular filters between fmin and
     // fmax, normalized by 2 / (mel_freqs[i+2] - mel_freqs[i]). Matches
     // librosa.filters.mel(htk=False, norm='slaney') byte for byte.
     const float fmin = cfg.fmin;
@@ -138,7 +138,7 @@ static void audio_mel_compute_constants(const AudioMelConfig & cfg, AudioMelCons
             }
             c.mel_basis[(size_t) m * (size_t) c.n_freq + (size_t) k] = w;
         }
-        // Slaney area normalization : 2 / (hi - lo).
+        // Slaney area normalization: 2 / (hi - lo).
         const float enorm = 2.0f / (hi - lo);
         for (int k = 0; k < c.n_freq; k++) {
             c.mel_basis[(size_t) m * (size_t) c.n_freq + (size_t) k] *= enorm;
@@ -161,7 +161,7 @@ static void audio_mel_compute_constants(const AudioMelConfig & cfg, AudioMelCons
 //                tensor [n_freq, T_frames] for debug bisection. NULL by
 //                default. Caller marks it as graph output if needed.
 //
-// Output : [n_mels, T_frames] f32 log mel.
+// Output: [n_mels, T_frames] f32 log mel.
 //
 // The im2col path produces frames [n_fft, T_frames] T-fastest, which is
 // the layout ggml_mul_mat expects on the right operand (ne[0] = K = n_fft,
