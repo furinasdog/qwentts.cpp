@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <utility>
 #include <vector>
 
 bool pipeline_codec_load(PipelineCodec * pc, const char * gguf_path, BackendPair bp) {
@@ -69,13 +70,11 @@ bool pipeline_codec_load(PipelineCodec * pc, const char * gguf_path, BackendPair
             gf_close(&pc->gguf);
             return false;
         }
-        pc->pre_conv_ctx = wctx.ctx;
-        pc->pre_conv_buf = wctx.buffer;
+        pc->pre_conv_wctx = std::move(wctx);
     }
 
     if (!seanet_encoder_load(&pc->seanet, pc->gguf, pc->backend)) {
-        ggml_backend_buffer_free(pc->pre_conv_buf);
-        ggml_free(pc->pre_conv_ctx);
+        wctx_free(&pc->pre_conv_wctx);
         dac_decoder_free(&pc->dac);
         upsample_stage_free(&pc->upsample);
         tok_trans_free(&pc->transformer);
@@ -86,8 +85,7 @@ bool pipeline_codec_load(PipelineCodec * pc, const char * gguf_path, BackendPair
 
     if (!enc_trans_load(&pc->enc_transformer, pc->gguf, pc->backend)) {
         seanet_encoder_free(&pc->seanet);
-        ggml_backend_buffer_free(pc->pre_conv_buf);
-        ggml_free(pc->pre_conv_ctx);
+        wctx_free(&pc->pre_conv_wctx);
         dac_decoder_free(&pc->dac);
         upsample_stage_free(&pc->upsample);
         tok_trans_free(&pc->transformer);
@@ -99,8 +97,7 @@ bool pipeline_codec_load(PipelineCodec * pc, const char * gguf_path, BackendPair
     if (!enc_down_load(&pc->enc_downsample, pc->gguf, pc->backend)) {
         enc_trans_free(&pc->enc_transformer);
         seanet_encoder_free(&pc->seanet);
-        ggml_backend_buffer_free(pc->pre_conv_buf);
-        ggml_free(pc->pre_conv_ctx);
+        wctx_free(&pc->pre_conv_wctx);
         dac_decoder_free(&pc->dac);
         upsample_stage_free(&pc->upsample);
         tok_trans_free(&pc->transformer);
@@ -113,8 +110,7 @@ bool pipeline_codec_load(PipelineCodec * pc, const char * gguf_path, BackendPair
         enc_down_free(&pc->enc_downsample);
         enc_trans_free(&pc->enc_transformer);
         seanet_encoder_free(&pc->seanet);
-        ggml_backend_buffer_free(pc->pre_conv_buf);
-        ggml_free(pc->pre_conv_ctx);
+        wctx_free(&pc->pre_conv_wctx);
         dac_decoder_free(&pc->dac);
         upsample_stage_free(&pc->upsample);
         tok_trans_free(&pc->transformer);
@@ -442,14 +438,7 @@ void pipeline_codec_free(PipelineCodec * pc) {
     enc_down_free(&pc->enc_downsample);
     enc_trans_free(&pc->enc_transformer);
     seanet_encoder_free(&pc->seanet);
-    if (pc->pre_conv_buf) {
-        ggml_backend_buffer_free(pc->pre_conv_buf);
-        pc->pre_conv_buf = NULL;
-    }
-    if (pc->pre_conv_ctx) {
-        ggml_free(pc->pre_conv_ctx);
-        pc->pre_conv_ctx = NULL;
-    }
+    wctx_free(&pc->pre_conv_wctx);
     dac_decoder_free(&pc->dac);
     upsample_stage_free(&pc->upsample);
     tok_trans_free(&pc->transformer);

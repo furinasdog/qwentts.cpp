@@ -53,12 +53,11 @@ struct PipelineCodec {
     QwenUpsampleStage        upsample;
     QwenDACDecoder           dac;
 
-    // pre_conv: causal Conv1d k=3, 512 -> 1024. Loaded into a dedicated
-    // weight ctx because it is the only module that does not own one.
-    struct ggml_tensor *  pre_conv_w;  // [3, 512, 1024] f32
-    struct ggml_tensor *  pre_conv_b;  // [1024] f32
-    struct ggml_context * pre_conv_ctx;
-    ggml_backend_buffer_t pre_conv_buf;
+    // pre_conv: causal Conv1d k=3, 512 -> 1024. Owns a dedicated
+    // WeightCtx because it is the only module without one.
+    struct ggml_tensor * pre_conv_w;  // [3, 512, 1024] f32
+    struct ggml_tensor * pre_conv_b;  // [1024] f32
+    WeightCtx            pre_conv_wctx;
 
     // Encode side modules
     QwenSEANetEncoder      seanet;

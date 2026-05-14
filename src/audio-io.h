@@ -27,29 +27,6 @@
 // utf8.h: utf8_fopen, the path-UTF-8-aware fopen used below.
 #include "utf8.h"
 
-// case-insensitive extension check
-static bool audio_io_ends_with(const char * str, const char * suffix) {
-    int slen = (int) strlen(str);
-    int xlen = (int) strlen(suffix);
-    if (slen < xlen) {
-        return false;
-    }
-    for (int i = 0; i < xlen; i++) {
-        char a = str[slen - xlen + i];
-        char b = suffix[i];
-        if (a >= 'A' && a <= 'Z') {
-            a += 32;
-        }
-        if (b >= 'A' && b <= 'Z') {
-            b += 32;
-        }
-        if (a != b) {
-            return false;
-        }
-    }
-    return true;
-}
-
 // Load entire file into memory. Caller frees the returned pointer.
 static uint8_t * audio_io_load_file(const char * path, size_t * size_out) {
     *size_out = 0;

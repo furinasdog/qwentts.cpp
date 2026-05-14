@@ -210,13 +210,6 @@ static void embed_text_range(const GGUFModel &      gf,
     }
 }
 
-// Append codec_embedding(id) to dst (one hidden-dim vector).
-static void embed_codec(const GGUFModel & gf, int id, int hidden_size, std::vector<float> & dst) {
-    size_t old = dst.size();
-    dst.resize(old + (size_t) hidden_size);
-    embed_row_to_f32(gf, "talker.codec_embd.weight", id, hidden_size, dst.data() + old);
-}
-
 // Vector add: a += b, length n.
 static void vec_add(float * a, const float * b, int n) {
     for (int i = 0; i < n; i++) {

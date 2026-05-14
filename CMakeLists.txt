@@ -20,8 +20,9 @@ add_custom_target(version ALL
 find_package(Threads REQUIRED)
 
 # Suppress MSVC fopen/sprintf deprecation warnings, force UTF-8 source and
-# execution charsets so non-ASCII string literals (CJK in text-chunker.h,
-# prompt-builder.cpp) survive the compile without a BOM.
+# execution charsets so non-ASCII string literals (CJK language names,
+# punctuation tables in BPE and prompt builder) survive the compile
+# without a BOM.
 if(MSVC)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
     add_compile_options(/utf-8)

@@ -6,7 +6,6 @@
 
 #include "utf8.h"
 
-#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <vector>
@@ -69,19 +68,6 @@ static void debug_dump_2d(const DebugDumper * d, const char * name, const float 
     debug_dump(d, name, data, shape, 2);
 }
 
-// Convenience: dump 3D tensor [d0, d1, d2].
-static void debug_dump_3d(const DebugDumper * d, const char * name, const float * data, int d0, int d1, int d2) {
-    int shape[3] = { d0, d1, d2 };
-    debug_dump(d, name, data, shape, 3);
-}
-
-// Convenience: dump 4D tensor [d0, d1, d2, d3].
-static void
-debug_dump_4d(const DebugDumper * d, const char * name, const float * data, int d0, int d1, int d2, int d3) {
-    int shape[4] = { d0, d1, d2, d3 };
-    debug_dump(d, name, data, shape, 4);
-}
-
 // Cast a stream of int32 values to f32 in place into a temporary buffer and
 // dump under the given name. Token comparisons are then expressed as cossim
 // over float values, with exact match recoverable via integer compare on the
@@ -103,18 +89,4 @@ static void debug_dump_i32_as_f32(const DebugDumper * d,
         buf[i] = (float) data[i];
     }
     debug_dump(d, name, buf.data(), shape, ndims);
-}
-
-// Cosine similarity between two f32 arrays.
-static double debug_cosine_sim(const float * a, const float * b, int n) {
-    double dot = 0, na = 0, nb = 0;
-    for (int i = 0; i < n; i++) {
-        dot += (double) a[i] * (double) b[i];
-        na += (double) a[i] * (double) a[i];
-        nb += (double) b[i] * (double) b[i];
-    }
-    if (na < 1e-30 || nb < 1e-30) {
-        return 0.0;
-    }
-    return dot / (sqrt(na) * sqrt(nb));
 }
