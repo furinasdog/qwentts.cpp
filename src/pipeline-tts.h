@@ -70,6 +70,34 @@ struct GenerationDefaults {
     int   max_new_tokens;
 };
 
+struct PromptTextProjection {
+    int                in_dim;
+    int                hid_dim;
+    int                out_dim;
+    std::vector<float> fc1_w;
+    std::vector<float> fc1_b;
+    std::vector<float> fc2_w;
+    std::vector<float> fc2_b;
+};
+
+struct PromptPrefixCacheEntry {
+    std::string        key;
+    int                rows;
+    std::vector<float> input_embed_prefix;
+};
+
+struct PromptCache {
+    bool                                initialized;
+    PromptTextProjection                text_projection;
+    std::vector<float>                  tts_bos_emb;
+    std::vector<float>                  tts_eos_emb;
+    std::vector<float>                  tts_pad_emb;
+    std::vector<float>                  codec_pad_emb;
+    std::vector<float>                  codec_bos_emb;
+    std::vector<PromptPrefixCacheEntry> prefix_entries;
+    size_t                              max_prefix_entries;
+};
+
 struct PipelineTTS {
     GGUFModel             gguf_talker;
     TalkerWeights         talker;
@@ -89,6 +117,7 @@ struct PipelineTTS {
     std::vector<LanguageEntry> languages;
     std::vector<SpeakerEntry>  speakers;
     GenerationDefaults         gen_defaults;
+    PromptCache                prompt_cache;
 
     BackendPair          bp;
     ggml_backend_t       backend;

@@ -157,6 +157,13 @@ bool pipeline_tts_load(PipelineTTS * pt,
         return false;
     }
 
+    if (!prompt_cache_load(pt)) {
+        code_predictor_weights_free(&pt->code_predictor);
+        talker_weights_free(&pt->talker);
+        gf_close(&pt->gguf_talker);
+        return false;
+    }
+
     // Speaker encoder is only present in Base checkpoints. Treat absence
     // as a soft condition: voice clone path stays disabled, base-direct
     // synthesis still works.
@@ -252,6 +259,7 @@ void pipeline_tts_free(PipelineTTS * pt) {
     code_predictor_weights_free(&pt->code_predictor);
     talker_weights_free(&pt->talker);
     gf_close(&pt->gguf_talker);
+    pt->prompt_cache = {};
     pt->backend             = NULL;
     pt->bp                  = {};
     pt->has_speaker_encoder = false;

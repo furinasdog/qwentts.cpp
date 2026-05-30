@@ -38,10 +38,9 @@
 // from text_projection(text_embedding(<|im_start|>user\n{instruct}<|im_end|>\n))
 // laid out as N_instruct standalone vectors before the role.
 //
-// All math is f32. text_embedding and codec_embedding are read from
-// the mmapped GGUF in their stored dtype (bf16 by default) and cast
-// row by row. The 2-layer ResizeMLP runs as two GEMMs with a SiLU in
-// between, with bias on both linear layers.
+// Prompt text projection uses the loaded GGML backend tensors when the
+// pipeline scheduler is available, with the scalar host path retained as
+// a fallback for graph allocation or backend failures.
 
 #include "bpe.h"
 #include "ggml.h"
@@ -54,6 +53,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 struct PromptBuilderOutput {
@@ -161,17 +161,7 @@ static inline float silu(float v) {
 
 // Apply text_projection: F1 (text_hidden -> text_hidden) -> SiLU -> F2
 // (text_hidden -> hidden), both with bias.
-struct TextProjection {
-    int                in_dim;   // text_hidden_size
-    int                hid_dim;  // intermediate (= text_hidden_size in 0.6B)
-    int                out_dim;  // hidden_size
-    std::vector<float> fc1_w;    // [hid_dim, in_dim]
-    std::vector<float> fc1_b;    // [hid_dim]
-    std::vector<float> fc2_w;    // [out_dim, hid_dim]
-    std::vector<float> fc2_b;    // [out_dim]
-};
-
-static void text_projection_load(TextProjection * tp, const GGUFModel & gf, int text_hidden_size, int hidden_size) {
+static void text_projection_load(PromptTextProjection * tp, const GGUFModel & gf, int text_hidden_size, int hidden_size) {
     tp->in_dim  = text_hidden_size;
     tp->hid_dim = text_hidden_size;
     tp->out_dim = hidden_size;
@@ -181,7 +171,7 @@ static void text_projection_load(TextProjection * tp, const GGUFModel & gf, int 
     read_tensor_f32(gf, "talker.text_proj.fc2.bias", tp->fc2_b);
 }
 
-static void text_projection_apply(const TextProjection * tp, const float * x, float * y) {
+static void text_projection_apply(const PromptTextProjection * tp, const float * x, float * y) {
     std::vector<float> h((size_t) tp->hid_dim);
     linear_f32(x, tp->fc1_w.data(), tp->fc1_b.data(), tp->in_dim, tp->hid_dim, h.data());
     for (int i = 0; i < tp->hid_dim; i++) {
@@ -190,24 +180,132 @@ static void text_projection_apply(const TextProjection * tp, const float * x, fl
     linear_f32(h.data(), tp->fc2_w.data(), tp->fc2_b.data(), tp->hid_dim, tp->out_dim, y);
 }
 
-// Compute text_proj(text_embedding(ids[start:end])) row by row, append
-// to dst (which already holds previous rows). Each output row is one
-// hidden-dim vector.
-static void embed_text_range(const GGUFModel &      gf,
-                             const TextProjection * tp,
-                             const int32_t *        ids,
-                             int                    start,
-                             int                    end,
-                             int                    text_hidden_size,
-                             int                    hidden_size,
-                             std::vector<float> &   dst) {
-    std::vector<float> e((size_t) text_hidden_size);
-    std::vector<float> y((size_t) hidden_size);
-    for (int i = start; i < end; i++) {
-        embed_row_to_f32(gf, "talker.text_embd.weight", ids[i], text_hidden_size, e.data());
-        text_projection_apply(tp, e.data(), y.data());
-        dst.insert(dst.end(), y.begin(), y.end());
+static bool project_text_ids_backend(PipelineTTS * pt, const int32_t * ids, int count, float * dst) {
+    if (count <= 0) {
+        return true;
     }
+    if (!pt->sched || !pt->talker.text_embedding || !pt->talker.text_proj_fc1_w || !pt->talker.text_proj_fc1_b ||
+        !pt->talker.text_proj_fc2_w || !pt->talker.text_proj_fc2_b) {
+        return false;
+    }
+
+    const int hidden    = pt->talker.hidden_size;
+    const int max_nodes = 64;
+    const size_t graph_arena_bytes =
+        ggml_tensor_overhead() * (size_t) max_nodes + ggml_graph_overhead_custom((size_t) max_nodes, false);
+
+    struct ggml_init_params gparams = {
+        graph_arena_bytes,
+        NULL,
+        true,
+    };
+    struct ggml_context * gctx = ggml_init(gparams);
+    if (!gctx) {
+        return false;
+    }
+
+    struct ggml_tensor * ids_in = ggml_new_tensor_1d(gctx, GGML_TYPE_I32, count);
+    ggml_set_name(ids_in, "prompt_text_ids");
+    ggml_set_input(ids_in);
+
+    struct ggml_tensor * h = ggml_get_rows(gctx, pt->talker.text_embedding, ids_in);
+    ggml_set_name(h, "prompt_text_embeds");
+    h = ggml_mul_mat(gctx, pt->talker.text_proj_fc1_w, h);
+    ggml_mul_mat_set_prec(h, GGML_PREC_F32);
+    h = ggml_add(gctx, h, pt->talker.text_proj_fc1_b);
+    h = ggml_silu(gctx, h);
+
+    struct ggml_tensor * out = ggml_mul_mat(gctx, pt->talker.text_proj_fc2_w, h);
+    ggml_mul_mat_set_prec(out, GGML_PREC_F32);
+    out = ggml_add(gctx, out, pt->talker.text_proj_fc2_b);
+    ggml_set_name(out, "prompt_text_projection");
+    ggml_set_output(out);
+
+    struct ggml_cgraph * graph = ggml_new_graph_custom(gctx, max_nodes, false);
+    ggml_build_forward_expand(graph, out);
+
+    if (!ggml_backend_sched_alloc_graph(pt->sched, graph)) {
+        ggml_backend_sched_reset(pt->sched);
+        ggml_free(gctx);
+        return false;
+    }
+
+    ggml_backend_tensor_set(ids_in, ids, 0, (size_t) count * sizeof(int32_t));
+    if (ggml_backend_sched_graph_compute(pt->sched, graph) != GGML_STATUS_SUCCESS) {
+        ggml_backend_sched_reset(pt->sched);
+        ggml_free(gctx);
+        return false;
+    }
+
+    ggml_backend_tensor_get(out, dst, 0, (size_t) count * (size_t) hidden * sizeof(float));
+    ggml_backend_sched_reset(pt->sched);
+    ggml_free(gctx);
+    return true;
+}
+
+static void project_text_range_host(PipelineTTS * pt, const int * ids, int start, int end, float * dst) {
+    const int hidden   = pt->talker.hidden_size;
+    const int text_hid = pt->talker.text_hidden_size;
+    PromptCache & pc = pt->prompt_cache;
+
+    std::vector<float> e((size_t) text_hid);
+    std::vector<float> y((size_t) hidden);
+    for (int i = start; i < end; i++) {
+        embed_row_to_f32(pt->gguf_talker, "talker.text_embd.weight", ids[i], text_hid, e.data());
+        text_projection_apply(&pc.text_projection, e.data(), y.data());
+        std::memcpy(dst + (size_t) (i - start) * (size_t) hidden, y.data(), (size_t) hidden * sizeof(float));
+    }
+}
+
+static void project_text_range(PipelineTTS * pt, const int * ids, int start, int end, float * dst) {
+    const int count = end - start;
+    if (count <= 0) {
+        return;
+    }
+
+    std::vector<int32_t> ids_i32((size_t) count);
+    for (int i = 0; i < count; i++) {
+        ids_i32[(size_t) i] = (int32_t) ids[start + i];
+    }
+    if (project_text_ids_backend(pt, ids_i32.data(), count, dst)) {
+        return;
+    }
+
+    project_text_range_host(pt, ids, start, end, dst);
+}
+
+static bool prompt_cache_load(PipelineTTS * pt) {
+    const int hidden   = pt->talker.hidden_size;
+    const int text_hid = pt->talker.text_hidden_size;
+
+    PromptCache & pc = pt->prompt_cache;
+    pc.initialized = false;
+    pc.prefix_entries.clear();
+    pc.max_prefix_entries = 16;
+
+    text_projection_load(&pc.text_projection, pt->gguf_talker, text_hid, hidden);
+
+    pc.tts_bos_emb.assign((size_t) hidden, 0.0f);
+    pc.tts_eos_emb.assign((size_t) hidden, 0.0f);
+    pc.tts_pad_emb.assign((size_t) hidden, 0.0f);
+    pc.codec_pad_emb.assign((size_t) hidden, 0.0f);
+    pc.codec_bos_emb.assign((size_t) hidden, 0.0f);
+
+    std::vector<float> e((size_t) text_hid);
+    embed_row_to_f32(pt->gguf_talker, "talker.text_embd.weight", pt->text_specials.tts_bos_id, text_hid, e.data());
+    text_projection_apply(&pc.text_projection, e.data(), pc.tts_bos_emb.data());
+    embed_row_to_f32(pt->gguf_talker, "talker.text_embd.weight", pt->text_specials.tts_eos_id, text_hid, e.data());
+    text_projection_apply(&pc.text_projection, e.data(), pc.tts_eos_emb.data());
+    embed_row_to_f32(pt->gguf_talker, "talker.text_embd.weight", pt->text_specials.tts_pad_id, text_hid, e.data());
+    text_projection_apply(&pc.text_projection, e.data(), pc.tts_pad_emb.data());
+
+    embed_row_to_f32(pt->gguf_talker, "talker.codec_embd.weight", pt->codec_specials.pad_id, hidden,
+                     pc.codec_pad_emb.data());
+    embed_row_to_f32(pt->gguf_talker, "talker.codec_embd.weight", pt->codec_specials.bos_id, hidden,
+                     pc.codec_bos_emb.data());
+
+    pc.initialized = true;
+    return true;
 }
 
 // Vector add: a += b, length n.
@@ -217,7 +315,61 @@ static void vec_add(float * a, const float * b, int n) {
     }
 }
 
-static bool prompt_builder_build(const PipelineTTS *   pt,
+static void append_ints_to_key(std::string & key, const char * label, const std::vector<int> & values) {
+    key += label;
+    key += '=';
+    for (int v : values) {
+        key += std::to_string(v);
+        key += ',';
+    }
+    key += ';';
+}
+
+static std::string prompt_prefix_cache_key(const std::vector<int> & instruct_ids,
+                                           const int *              role_ids,
+                                           const std::vector<int> & codec_left) {
+    std::string key;
+    key.reserve(128 + instruct_ids.size() * 8 + codec_left.size() * 8);
+    append_ints_to_key(key, "instruct", instruct_ids);
+    std::vector<int> role(role_ids, role_ids + 3);
+    append_ints_to_key(key, "role", role);
+    append_ints_to_key(key, "codec", codec_left);
+    return key;
+}
+
+static PromptPrefixCacheEntry * prompt_prefix_cache_find(PromptCache & pc, const std::string & key) {
+    for (PromptPrefixCacheEntry & entry : pc.prefix_entries) {
+        if (entry.key == key) {
+            return &entry;
+        }
+    }
+    return NULL;
+}
+
+static void prompt_prefix_cache_store(PromptCache &      pc,
+                                      const std::string & key,
+                                      int                 rows,
+                                      int                 hidden,
+                                      const float *       data) {
+    if (pc.max_prefix_entries == 0 || rows <= 0) {
+        return;
+    }
+    if (PromptPrefixCacheEntry * existing = prompt_prefix_cache_find(pc, key)) {
+        existing->rows = rows;
+        existing->input_embed_prefix.assign(data, data + (size_t) rows * (size_t) hidden);
+        return;
+    }
+    while (pc.prefix_entries.size() >= pc.max_prefix_entries) {
+        pc.prefix_entries.erase(pc.prefix_entries.begin());
+    }
+    PromptPrefixCacheEntry entry;
+    entry.key = key;
+    entry.rows = rows;
+    entry.input_embed_prefix.assign(data, data + (size_t) rows * (size_t) hidden);
+    pc.prefix_entries.push_back(std::move(entry));
+}
+
+static bool prompt_builder_build(PipelineTTS *         pt,
                                  const BPETokenizer *  tok,
                                  const std::string &   utterance_text,
                                  const std::string &   language,
@@ -228,8 +380,7 @@ static bool prompt_builder_build(const PipelineTTS *   pt,
                                  const int32_t *       ref_codes,
                                  int                   ref_codes_T,
                                  PromptBuilderOutput * out) {
-    const int hidden   = pt->talker.hidden_size;
-    const int text_hid = pt->talker.text_hidden_size;
+    const int hidden = pt->talker.hidden_size;
 
     if (!speaker_name.empty() && ref_spk_emb != NULL) {
         fprintf(stderr, "[Prompt] FATAL: speaker_name and ref_spk_emb are mutually exclusive\n");
@@ -338,28 +489,17 @@ static bool prompt_builder_build(const PipelineTTS *   pt,
         }
     }
 
-    // Load the small tensors needed for the builder onto the host side.
-    TextProjection tp;
-    text_projection_load(&tp, pt->gguf_talker, text_hid, hidden);
-
-    // Special embeds (tts_bos, tts_eos, tts_pad, codec_pad, codec_bos)
-    // computed once.
-    std::vector<float> tts_bos_emb((size_t) hidden);
-    std::vector<float> tts_eos_emb((size_t) hidden);
-    std::vector<float> tts_pad_emb((size_t) hidden);
-    {
-        std::vector<float> e((size_t) text_hid);
-        embed_row_to_f32(pt->gguf_talker, "talker.text_embd.weight", pt->text_specials.tts_bos_id, text_hid, e.data());
-        text_projection_apply(&tp, e.data(), tts_bos_emb.data());
-        embed_row_to_f32(pt->gguf_talker, "talker.text_embd.weight", pt->text_specials.tts_eos_id, text_hid, e.data());
-        text_projection_apply(&tp, e.data(), tts_eos_emb.data());
-        embed_row_to_f32(pt->gguf_talker, "talker.text_embd.weight", pt->text_specials.tts_pad_id, text_hid, e.data());
-        text_projection_apply(&tp, e.data(), tts_pad_emb.data());
+    if (!pt->prompt_cache.initialized) {
+        fprintf(stderr, "[Prompt] FATAL: prompt cache is not initialized\n");
+        return false;
     }
+    PromptCache & pc = pt->prompt_cache;
 
-    std::vector<float> codec_pad_emb((size_t) hidden);
-    embed_row_to_f32(pt->gguf_talker, "talker.codec_embd.weight", pt->codec_specials.pad_id, hidden,
-                     codec_pad_emb.data());
+    const std::vector<float> & tts_bos_emb   = pc.tts_bos_emb;
+    const std::vector<float> & tts_eos_emb   = pc.tts_eos_emb;
+    const std::vector<float> & tts_pad_emb   = pc.tts_pad_emb;
+    const std::vector<float> & codec_pad_emb = pc.codec_pad_emb;
+    const std::vector<float> & codec_bos_emb = pc.codec_bos_emb;
 
     // Codec prefill list: 3 ids if auto (no language), 4 otherwise.
     // Speaker insertion: if a speaker id is set, the codec embedding row
@@ -383,6 +523,8 @@ static bool prompt_builder_build(const PipelineTTS *   pt,
     const int n_prefill      = (int) codec_prefill.size();
     const int T_codec_prefix = n_prefill + 2;  // + codec_pad + codec_bos
     const int n_pad_pre      = T_codec_prefix - 2;
+    std::vector<int> codec_left = codec_prefill;
+    codec_left.push_back(pt->codec_specials.pad_id);
 
     // Tokenize the instruct segment when non empty. The wrapper mirrors
     // _build_instruct_text upstream: <|im_start|>user\n{instruct}<|im_end|>\n
@@ -449,31 +591,35 @@ static bool prompt_builder_build(const PipelineTTS *   pt,
         return out->input_embed.data() + (size_t) r * (size_t) hidden;
     };
 
-    // Instruct prefix: text_proj(text_embed(instruct_ids)). Standalone
-    // vectors with no codec stream (zero pad_id sum, ie nothing added).
-    if (N_instruct > 0) {
-        std::vector<float> dst;
-        embed_text_range(pt->gguf_talker, &tp, instruct_ids.data(), 0, N_instruct, text_hid, hidden, dst);
-        std::memcpy(row_ptr(row), dst.data(), dst.size() * sizeof(float));
-        row += N_instruct;
+    const int prefix_rows = N_instruct + 3 + (int) codec_left.size();
+    const bool cacheable_prefix = !icl && ref_spk_emb == NULL;
+    std::string prefix_key;
+    PromptPrefixCacheEntry * prefix_hit = NULL;
+    if (cacheable_prefix) {
+        prefix_key = prompt_prefix_cache_key(instruct_ids, ids.data(), codec_left);
+        prefix_hit = prompt_prefix_cache_find(pc, prefix_key);
     }
 
-    // Role: text_proj(text_embed(ids[0:3]))
-    {
-        std::vector<float> dst;
-        dst.reserve((size_t) 3 * (size_t) hidden);
-        embed_text_range(pt->gguf_talker, &tp, ids.data(), 0, 3, text_hid, hidden, dst);
-        std::memcpy(row_ptr(row), dst.data(), dst.size() * sizeof(float));
+    if (prefix_hit) {
+        std::memcpy(row_ptr(0), prefix_hit->input_embed_prefix.data(),
+                    (size_t) prefix_hit->rows * (size_t) hidden * sizeof(float));
+        row = prefix_hit->rows;
+    } else {
+        // Instruct prefix: text_proj(text_embed(instruct_ids)). Standalone
+        // vectors with no codec stream (zero pad_id sum, ie nothing added).
+        if (N_instruct > 0) {
+            project_text_range(pt, instruct_ids.data(), 0, N_instruct, row_ptr(row));
+            row += N_instruct;
+        }
+
+        // Role: text_proj(text_embed(ids[0:3]))
+        project_text_range(pt, ids.data(), 0, 3, row_ptr(row));
         row += 3;
-    }
 
-    // Codec prefix: tts_pad x n_pad_pre + tts_bos, summed with
-    // codec_emb([codec_prefill_list[:-1]] + codec_pad). The Python code
-    // takes codec_input_embedding[:, :-1] which drops the codec_bos,
-    // leaving [codec_prefill_list..., codec_pad].
-    {
-        std::vector<int> codec_left = codec_prefill;
-        codec_left.push_back(pt->codec_specials.pad_id);
+        // Codec prefix: tts_pad x n_pad_pre + tts_bos, summed with
+        // codec_emb([codec_prefill_list[:-1]] + codec_pad). The Python code
+        // takes codec_input_embedding[:, :-1] which drops the codec_bos,
+        // leaving [codec_prefill_list..., codec_pad].
         for (int i = 0; i < (int) codec_left.size(); i++) {
             float *       r        = row_ptr(row + i);
             // text stream: tts_pad * (n - 1) then tts_bos at the end
@@ -492,6 +638,10 @@ static bool prompt_builder_build(const PipelineTTS *   pt,
             vec_add(r, ce.data(), hidden);
         }
         row += (int) codec_left.size();
+
+        if (cacheable_prefix && row == prefix_rows) {
+            prompt_prefix_cache_store(pc, prefix_key, prefix_rows, hidden, row_ptr(0));
+        }
     }
 
     // From here, two paths: standard (no ICL) builds the trailing
@@ -500,16 +650,12 @@ static bool prompt_builder_build(const PipelineTTS *   pt,
     if (!icl) {
         // Standard layout: trailing utterance text + tts_eos rows summed
         // with codec_pad, then a final tts_pad + codec_bos row.
+        project_text_range(pt, ids.data(), 3, 3 + N_text, row_ptr(row));
         for (int i = 0; i < N_text; i++) {
-            std::vector<float> e((size_t) text_hid);
-            std::vector<float> y((size_t) hidden);
-            embed_row_to_f32(pt->gguf_talker, "talker.text_embd.weight", ids[3 + i], text_hid, e.data());
-            text_projection_apply(&tp, e.data(), y.data());
-            float * r = row_ptr(row);
-            std::memcpy(r, y.data(), (size_t) hidden * sizeof(float));
+            float * r = row_ptr(row + i);
             vec_add(r, codec_pad_emb.data(), hidden);
-            row++;
         }
+        row += N_text;
         {
             float * r = row_ptr(row);
             std::memcpy(r, tts_eos_emb.data(), (size_t) hidden * sizeof(float));
@@ -519,9 +665,7 @@ static bool prompt_builder_build(const PipelineTTS *   pt,
         {
             float * r = row_ptr(row);
             std::memcpy(r, tts_pad_emb.data(), (size_t) hidden * sizeof(float));
-            std::vector<float> ce((size_t) hidden);
-            embed_row_to_f32(pt->gguf_talker, "talker.codec_embd.weight", pt->codec_specials.bos_id, hidden, ce.data());
-            vec_add(r, ce.data(), hidden);
+            vec_add(r, codec_bos_emb.data(), hidden);
             row++;
         }
     } else {
@@ -539,8 +683,7 @@ static bool prompt_builder_build(const PipelineTTS *   pt,
         std::vector<float> codec_stream((size_t) T_icl * (size_t) hidden, 0.0f);
         {
             // Row 0: codec_bos lookup.
-            embed_row_to_f32(pt->gguf_talker, "talker.codec_embd.weight", pt->codec_specials.bos_id, hidden,
-                             codec_stream.data());
+            std::memcpy(codec_stream.data(), codec_bos_emb.data(), (size_t) hidden * sizeof(float));
             // Row 1..ref_codes_T: sum over codebooks.
             std::vector<float> tmp((size_t) hidden);
             for (int t = 0; t < ref_codes_T; t++) {
@@ -562,17 +705,12 @@ static bool prompt_builder_build(const PipelineTTS *   pt,
         // Build the text stream [text_lens_icl, hidden] = text_proj of
         // [ref_text; utterance_text] then tts_eos.
         std::vector<float> text_stream((size_t) text_lens_icl * (size_t) hidden, 0.0f);
-        for (int i = 0; i < N_ref_text; i++) {
-            std::vector<float> e((size_t) text_hid);
-            float *            r = text_stream.data() + (size_t) i * (size_t) hidden;
-            embed_row_to_f32(pt->gguf_talker, "talker.text_embd.weight", ref_ids[3 + i], text_hid, e.data());
-            text_projection_apply(&tp, e.data(), r);
+        if (N_ref_text > 0) {
+            project_text_range(pt, ref_ids.data(), 3, 3 + N_ref_text, text_stream.data());
         }
-        for (int i = 0; i < N_text; i++) {
-            std::vector<float> e((size_t) text_hid);
-            float *            r = text_stream.data() + (size_t) (N_ref_text + i) * (size_t) hidden;
-            embed_row_to_f32(pt->gguf_talker, "talker.text_embd.weight", ids[3 + i], text_hid, e.data());
-            text_projection_apply(&tp, e.data(), r);
+        if (N_text > 0) {
+            project_text_range(pt, ids.data(), 3, 3 + N_text,
+                               text_stream.data() + (size_t) N_ref_text * (size_t) hidden);
         }
         // Append tts_eos at the end of the text stream.
         std::memcpy(text_stream.data() + (size_t) (text_lens_icl - 1) * (size_t) hidden, tts_eos_emb.data(),
