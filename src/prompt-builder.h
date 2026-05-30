@@ -143,7 +143,7 @@ static void read_tensor_f32(const GGUFModel & gf, const char * tensor_name, std:
 // y = W @ x + b
 //   x [in_dim] f32, W [out_dim, in_dim] row-major f32, b [out_dim] f32
 //   y [out_dim] f32
-// Naive dot-product GEMV, fine for small (≤2048) inputs at build time.
+// Naive dot-product GEMV, fine for small (<=2048) inputs at build time.
 static void linear_f32(const float * x, const float * W, const float * b, int in_dim, int out_dim, float * y) {
     for (int o = 0; o < out_dim; o++) {
         const float * row = W + (size_t) o * (size_t) in_dim;
