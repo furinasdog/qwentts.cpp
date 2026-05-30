@@ -38,9 +38,8 @@
 // from text_projection(text_embedding(<|im_start|>user\n{instruct}<|im_end|>\n))
 // laid out as N_instruct standalone vectors before the role.
 //
-// Prompt text projection uses the loaded GGML backend tensors when the
-// pipeline scheduler is available, with the scalar host path retained as
-// a fallback for graph allocation or backend failures.
+// Prompt text projection runs on the loaded GGML backend tensors through
+// the pipeline scheduler. Backend failure is fatal: no host path exists.
 
 #include "bpe.h"
 #include "ggml.h"
@@ -246,20 +245,6 @@ static bool project_text_ids_backend(PipelineTTS * pt, const int32_t * ids, int 
     return true;
 }
 
-static void project_text_range_host(PipelineTTS * pt, const int * ids, int start, int end, float * dst) {
-    const int     hidden   = pt->talker.hidden_size;
-    const int     text_hid = pt->talker.text_hidden_size;
-    PromptCache & pc       = pt->prompt_cache;
-
-    std::vector<float> e((size_t) text_hid);
-    std::vector<float> y((size_t) hidden);
-    for (int i = start; i < end; i++) {
-        embed_row_to_f32(pt->gguf_talker, "talker.text_embd.weight", ids[i], text_hid, e.data());
-        text_projection_apply(&pc.text_projection, e.data(), y.data());
-        std::memcpy(dst + (size_t) (i - start) * (size_t) hidden, y.data(), (size_t) hidden * sizeof(float));
-    }
-}
-
 static void project_text_range(PipelineTTS * pt, const int * ids, int start, int end, float * dst) {
     const int count = end - start;
     if (count <= 0) {
@@ -270,11 +255,9 @@ static void project_text_range(PipelineTTS * pt, const int * ids, int start, int
     for (int i = 0; i < count; i++) {
         ids_i32[(size_t) i] = (int32_t) ids[start + i];
     }
-    if (project_text_ids_backend(pt, ids_i32.data(), count, dst)) {
-        return;
+    if (!project_text_ids_backend(pt, ids_i32.data(), count, dst)) {
+        qt_throw("[Prompt] backend text projection failed (%d ids)", count);
     }
-
-    project_text_range_host(pt, ids, start, end, dst);
 }
 
 static bool prompt_cache_load(PipelineTTS * pt) {
