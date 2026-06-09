@@ -330,6 +330,7 @@ static bool talker_forward_core(const TalkerWeights * tw,
     }
     ggml_build_forward_expand(gf, logits);
 
+    ggml_backend_sched_reset(sched);
     if (!ggml_backend_sched_alloc_graph(sched, gf)) {
         fprintf(stderr, "[TalkerForward] FATAL: graph allocation failed\n");
         ggml_backend_sched_reset(sched);
