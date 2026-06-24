@@ -21,12 +21,12 @@ jobs:
             vs-version: "17"
             cuda-version: "12"
             cuda-installer: "cuda_12.9.0_windows.exe"
-            cuda-url: "https://developer.download.nvidia.com/compute/cuda/12.9.0/local_installers/cuda_12.9.0_windows.exe"
+            cuda-url: "https://developer.download.nvidia.com/compute/cuda/12.9.0/local_installers/cuda_12.9.0_576.02_windows.exe"
           - os: windows-2025
             vs-version: "18"
             cuda-version: "13"
             cuda-installer: "cuda_13.0.0_windows.exe"
-            cuda-url: "https://developer.download.nvidia.com/compute/cuda/13.0.0/local_installers/cuda_13.0.0_windows.exe"
+            cuda-url: "https://developer.download.nvidia.com/compute/cuda/13.3.0/local_installers/cuda_13.3.0_windows.exe"
 
     steps:
       - name: Checkout repository
