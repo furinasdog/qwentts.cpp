@@ -27,7 +27,7 @@ jobs:
           - os: windows-2025
             vs-version: "18"
             # 若 13.3.0 尚未被该 Action 收录，请将其改为文档示例中的 "13.2.0"
-            cuda-version: "13.3.0" 
+            cuda-version: "13.2.0" 
 
     steps:
       - name: Checkout repository
