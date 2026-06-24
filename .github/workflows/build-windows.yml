@@ -26,7 +26,7 @@ jobs:
             cuda-version: "12.9.0"
           - os: windows-2025
             vs-version: "18"
-            # 若 13.3.0 尚未被该 Action 收录，请将其改为文档示例中的 "13.2.0"
+            # 若 13.3.0 尚未被该 Action 收录，请将其改为 "13.2.0"
             cuda-version: "13.2.0" 
 
     steps:
@@ -57,8 +57,8 @@ jobs:
           if exist build rmdir /s /q build
           mkdir build
           cd build
-          :: Action 已自动处理环境变量与 VS 集成，CMake 可直接识别 CUDA
-          cmake .. -A x64 -DGGML_CPU_ALL_VARIANTS=ON -DGGML_CUDA=ON -DGGML_VULKAN=ON -DGGML_BACKEND_DL=ON
+          :: 添加 CMAKE_PREFIX_PATH 以定位 SPIRV-Headers 等 Vulkan SDK 组件的 CMake 配置文件
+          cmake .. -A x64 -DCMAKE_PREFIX_PATH="%VULKAN_SDK%" -DGGML_CPU_ALL_VARIANTS=ON -DGGML_CUDA=ON -DGGML_VULKAN=ON -DGGML_BACKEND_DL=ON
 
       - name: Build Release
         shell: cmd
