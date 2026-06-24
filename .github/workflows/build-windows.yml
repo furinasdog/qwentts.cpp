@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+env:
+  # 强制使用 Node 24 运行时，消除 Node 20 弃用警告
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-windows:
     name: Build Windows (VC${{ matrix.vs-version }} + CUDA ${{ matrix.cuda-version }} + Vulkan)
@@ -49,20 +53,25 @@ jobs:
           start /wait "" "${{ matrix.cuda-installer }}" -s
           del "${{ matrix.cuda-installer }}"
           
-          :: 使用正斜杠防止转义问题，并使用精确的小版本号 (如 v12.9)
-          echo CUDA_PATH=C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${{ matrix.cuda-version }}>> "%GITHUB_ENV%"
-          echo CUDA_PATH_V${{ matrix.cuda-version }}=C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${{ matrix.cuda-version }}>> "%GITHUB_ENV%"
-          echo C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${{ matrix.cuda-version }}/bin>> "%GITHUB_PATH%"
-          echo C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${{ matrix.cuda-version }}/libnvvp>> "%GITHUB_PATH%"
+          :: 使用反斜杠，并采用前置重定向语法防止尾部空格导致路径失效
+          >> "%GITHUB_ENV%" echo CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ matrix.cuda-version }}
+          >> "%GITHUB_ENV%" echo CUDA_PATH_V${{ matrix.cuda-version }}=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ matrix.cuda-version }}
+          >> "%GITHUB_PATH%" echo C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ matrix.cuda-version }}\bin
+          >> "%GITHUB_PATH%" echo C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ matrix.cuda-version }}\libnvvp
 
       - name: Configure CMake
         shell: cmd
         run: |
+          :: 在当前会话中强制注入环境变量，确保 MSBuild 能正确读取
+          set "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ matrix.cuda-version }}"
+          set "PATH=%CUDA_PATH%\bin;%PATH%"
+          
           if exist build rmdir /s /q build
           mkdir build
           cd build
-          :: 显式指定 CUDAToolkit_ROOT 确保 CMake 能直接找到 nvcc
-          cmake .. -A x64 -DCUDAToolkit_ROOT="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${{ matrix.cuda-version }}" -DGGML_CPU_ALL_VARIANTS=ON -DGGML_CUDA=ON -DGGML_VULKAN=ON -DGGML_BACKEND_DL=ON
+          
+          :: 显式指定 CUDAToolkit_ROOT 和 CMAKE_CUDA_COMPILER 绕过自动检测缺陷
+          cmake .. -A x64 -DCUDAToolkit_ROOT="%CUDA_PATH%" -DCMAKE_CUDA_COMPILER="%CUDA_PATH%\bin\nvcc.exe" -DGGML_CPU_ALL_VARIANTS=ON -DGGML_CUDA=ON -DGGML_VULKAN=ON -DGGML_BACKEND_DL=ON
 
       - name: Build Release
         shell: cmd
