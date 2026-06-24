@@ -10,7 +10,6 @@ permissions:
   contents: write
 
 env:
-  # 强制使用 Node 24 运行时，消除 Node 20 弃用警告
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -26,8 +25,7 @@ jobs:
             cuda-version: "12.9.0"
           - os: windows-2025
             vs-version: "18"
-            # 若 13.3.0 尚未被该 Action 收录，请将其改为 "13.2.0"
-            cuda-version: "13.2.0" 
+            cuda-version: "13.3.0" 
 
     steps:
       - name: Checkout repository
@@ -48,24 +46,18 @@ jobs:
         id: cuda-toolkit
         with:
           cuda: ${{ matrix.cuda-version }}
-          # 矩阵构建必须指定日志后缀以防止文件覆盖
           log-file-suffix: 'vc${{ matrix.vs-version }}-cuda${{ matrix.cuda-version }}.txt'
 
       - name: Prepare SPIRV-Headers CMake Config
         shell: pwsh
         run: |
-          # 动态生成 SPIRV-Headers 的 CMake 配置文件，绕过 Windows Vulkan SDK 中配置文件缺失的问题
           $configDir = "$PWD\cmake-configs\SPIRV-Headers"
           New-Item -ItemType Directory -Force -Path $configDir
-          
-          # 创建 INTERFACE 库目标，并将包含目录指向 Vulkan SDK 的 Include 文件夹
           $configContent = @"
           add_library(SPIRV-Headers INTERFACE)
           target_include_directories(SPIRV-Headers INTERFACE "`$ENV{VULKAN_SDK}/Include")
           "@
           Set-Content -Path "$configDir\SPIRV-HeadersConfig.cmake" -Value $configContent
-          
-          # 将自定义配置目录注入环境变量，供后续 CMake 步骤读取
           echo "CMAKE_PREFIX_PATH_EXTRA=$PWD\cmake-configs" >> $env:GITHUB_ENV
 
       - name: Configure CMake
@@ -74,8 +66,6 @@ jobs:
           if exist build rmdir /s /q build
           mkdir build
           cd build
-          
-          :: 将 Vulkan SDK 根目录与自定义配置目录同时加入 CMAKE_PREFIX_PATH
           cmake .. -A x64 -DCMAKE_PREFIX_PATH="%VULKAN_SDK%;%CMAKE_PREFIX_PATH_EXTRA%" -DGGML_CPU_ALL_VARIANTS=ON -DGGML_CUDA=ON -DGGML_VULKAN=ON -DGGML_BACKEND_DL=ON
 
       - name: Build Release
@@ -89,14 +79,15 @@ jobs:
         run: |
           $artifactName = "qwen-tts-windows-vc${{ matrix.vs-version }}-cuda${{ matrix.cuda-version }}-vulkan"
           New-Item -ItemType Directory -Force -Path "release\$artifactName"
+          # 仅复制文件到目录，不再在此步骤进行压缩
           Copy-Item -Path "build\Release\*" -Destination "release\$artifactName\" -Recurse -Force
-          Compress-Archive -Path "release\$artifactName" -DestinationPath "release\$artifactName.zip" -Force
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: qwen-tts-windows-vc${{ matrix.vs-version }}-cuda${{ matrix.cuda-version }}-vulkan
-          path: release/qwen-tts-windows-vc${{ matrix.vs-version }}-cuda${{ matrix.cuda-version }}-vulkan.zip
+          # 直接上传文件夹，交由 GitHub 处理 Artifact 的打包
+          path: release/qwen-tts-windows-vc${{ matrix.vs-version }}-cuda${{ matrix.cuda-version }}-vulkan
           retention-days: 5
 
   publish-release:
@@ -111,10 +102,21 @@ jobs:
         with:
           path: artifacts
 
+      - name: Package Artifacts for Release
+        run: |
+          cd artifacts
+          # 遍历所有下载的 Artifact 文件夹，并分别压缩为同名的 ZIP 文件
+          for dir in */; do
+            name="${dir%/}"
+            zip -r "$name.zip" "$dir"
+          done
+        shell: bash
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*.zip
+          # 上传在上一部生成的 ZIP 文件
+          files: artifacts/*.zip
           draft: false
           prerelease: false
           generate_release_notes: true
