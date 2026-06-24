@@ -172,6 +172,8 @@ static const char WEBUI_HTML[] = R"rawhtml(
   }
 </style>
 </head>
+)rawhtml"
+    R"rawhtml(
 <body>
 <header class="app-header">
   <h1>QwenTTS 语音合成 WebUI</h1>
@@ -290,6 +292,8 @@ static const char WEBUI_HTML[] = R"rawhtml(
       </div>
     </div>
   </div>
+)rawhtml"
+    R"rawhtml(
 
   <!-- ============================================================ TAB 3: 编码文件克隆 -->
   <div class="tab-panel" id="tab-2">
@@ -448,6 +452,8 @@ static const char WEBUI_HTML[] = R"rawhtml(
     </div>
   </div>
 </div>
+)rawhtml"
+    R"rawhtml(
 
 <script>
 // ─── Tab 切换 ─────────────────────────────────────────────────────────────────
@@ -618,6 +624,8 @@ function b64ToBlob(b64, mime) {
   for (var i = 0; i < byteStr.length; i++) ia[i] = byteStr.charCodeAt(i);
   return new Blob([ab], { type: mime });
 }
+)rawhtml"
+    R"rawhtml(
 
 // ─── Tab 3: 编码文件克隆 ──────────────────────────────────────────────────────
 async function doFileClone() {
