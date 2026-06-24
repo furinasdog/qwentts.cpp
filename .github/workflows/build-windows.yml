@@ -1,0 +1,120 @@
+name: Build Windows Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # 强制使用 Node 24 运行时，消除 Node 20 弃用警告
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build-windows:
+    name: Build Windows (VC${{ matrix.vs-version }} + CUDA ${{ matrix.cuda-version }} + Vulkan)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            vs-version: "17"
+            cuda-version: "12.9.0"
+          - os: windows-2025
+            vs-version: "18"
+            # 若 13.3.0 尚未被该 Action 收录，请将其改为 "13.2.0"
+            cuda-version: "13.2.0" 
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Vulkan SDK
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          vulkan_version: "1.3.296.0"
+          install_runtime: true
+          install_development: true
+          cache: true
+
+      - name: Install CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.35
+        id: cuda-toolkit
+        with:
+          cuda: ${{ matrix.cuda-version }}
+          # 矩阵构建必须指定日志后缀以防止文件覆盖
+          log-file-suffix: 'vc${{ matrix.vs-version }}-cuda${{ matrix.cuda-version }}.txt'
+
+      - name: Prepare SPIRV-Headers CMake Config
+        shell: pwsh
+        run: |
+          # 动态生成 SPIRV-Headers 的 CMake 配置文件，绕过 Windows Vulkan SDK 中配置文件缺失的问题
+          $configDir = "$PWD\cmake-configs\SPIRV-Headers"
+          New-Item -ItemType Directory -Force -Path $configDir
+          
+          # 创建 INTERFACE 库目标，并将包含目录指向 Vulkan SDK 的 Include 文件夹
+          $configContent = @"
+          add_library(SPIRV-Headers INTERFACE)
+          target_include_directories(SPIRV-Headers INTERFACE "`$ENV{VULKAN_SDK}/Include")
+          "@
+          Set-Content -Path "$configDir\SPIRV-HeadersConfig.cmake" -Value $configContent
+          
+          # 将自定义配置目录注入环境变量，供后续 CMake 步骤读取
+          echo "CMAKE_PREFIX_PATH_EXTRA=$PWD\cmake-configs" >> $env:GITHUB_ENV
+
+      - name: Configure CMake
+        shell: cmd
+        run: |
+          if exist build rmdir /s /q build
+          mkdir build
+          cd build
+          
+          :: 将 Vulkan SDK 根目录与自定义配置目录同时加入 CMAKE_PREFIX_PATH
+          cmake .. -A x64 -DCMAKE_PREFIX_PATH="%VULKAN_SDK%;%CMAKE_PREFIX_PATH_EXTRA%" -DGGML_CPU_ALL_VARIANTS=ON -DGGML_CUDA=ON -DGGML_VULKAN=ON -DGGML_BACKEND_DL=ON
+
+      - name: Build Release
+        shell: cmd
+        run: |
+          cd build
+          cmake --build . --config Release -j %NUMBER_OF_PROCESSORS%
+
+      - name: Prepare Release Artifacts
+        shell: pwsh
+        run: |
+          $artifactName = "qwen-tts-windows-vc${{ matrix.vs-version }}-cuda${{ matrix.cuda-version }}-vulkan"
+          New-Item -ItemType Directory -Force -Path "release\$artifactName"
+          Copy-Item -Path "build\Release\*" -Destination "release\$artifactName\" -Recurse -Force
+          Compress-Archive -Path "release\$artifactName" -DestinationPath "release\$artifactName.zip" -Force
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qwen-tts-windows-vc${{ matrix.vs-version }}-cuda${{ matrix.cuda-version }}-vulkan
+          path: release/qwen-tts-windows-vc${{ matrix.vs-version }}-cuda${{ matrix.cuda-version }}-vulkan.zip
+          retention-days: 5
+
+  publish-release:
+    name: Publish Release
+    needs: build-windows
+    runs-on: ubuntu-latest
+    if: always() && startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true
