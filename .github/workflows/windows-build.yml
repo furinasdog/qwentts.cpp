@@ -1,0 +1,119 @@
+name: Windows Build
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-vc17:
+    name: Build VC17 (CUDA + Vulkan + All CPU)
+    runs-on: windows-2022
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Setup MSVC (VS 2022 / VC17)
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        toolset: '14.3' # VC17 (Visual Studio 2022)
+
+    - name: Configure CMake (VC17 - CUDA + Vulkan + All CPU)
+      run: |
+        mkdir build
+        cd build
+        cmake .. `
+          -DGGML_CPU_ALL_VARIANTS=ON `
+          -DGGML_CUDA=ON `
+          -DGGML_VULKAN=ON `
+          -DGGML_BACKEND_DL=ON `
+          -G "Visual Studio 17 2022" `
+          -A x64
+
+    - name: Build (VC17)
+      run: |
+        cd build
+        cmake --build . --config Release -j $env:NUMBER_OF_PROCESSORS
+
+    - name: Upload artifacts (VC17)
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-vc17-build
+        path: build/Release/*
+
+  build-vc18:
+    name: Build VC18 (CUDA + Vulkan + All CPU)
+    runs-on: windows-2025
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Setup MSVC (VS 2026 / VC18)
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        toolset: '14.4' # VC18 (Visual Studio 2026)
+
+    - name: Configure CMake (VC18 - CUDA + Vulkan + All CPU)
+      run: |
+        mkdir build
+        cd build
+        cmake .. `
+          -DGGML_CPU_ALL_VARIANTS=ON `
+          -DGGML_CUDA=ON `
+          -DGGML_VULKAN=ON `
+          -DGGML_BACKEND_DL=ON `
+          -G "Visual Studio 18 2026" `
+          -A x64
+
+    - name: Build (VC18)
+      run: |
+        cd build
+        cmake --build . --config Release -j $env:NUMBER_OF_PROCESSORS
+
+    - name: Upload artifacts (VC18)
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-vc18-build
+        path: build/Release/*
+
+  release:
+    name: Create GitHub Release
+    needs: [build-vc17, build-vc18]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - name: Download VC17 artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: windows-vc17-build
+        path: vc17-build
+
+    - name: Download VC18 artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: windows-vc18-build
+        path: vc18-build
+
+    - name: Compress VC17 build
+      run: zip -r windows-vc17-release.zip vc17-build
+
+    - name: Compress VC18 build
+      run: zip -r windows-vc18-release.zip vc18-build
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          windows-vc17-release.zip
+          windows-vc18-release.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
