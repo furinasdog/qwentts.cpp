@@ -36,8 +36,8 @@ static std::string basename_of(const char * path) {
 }
 
 int main(int argc, char ** argv) {
-    const char *  talker_path = NULL;
-    const char *  codec_path  = NULL;
+    const char * talker_path = "models/qwen-talker-1.7b-base-Q8_0.gguf";
+    const char * codec_path  = "models/qwen-tokenizer-12hz-Q8_0.gguf";
     std::string   lang        = "auto";
     server_config cfg;
     bool          use_fa     = true;

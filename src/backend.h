@@ -61,7 +61,7 @@ static ggml_backend_t cpu_backend_new(int n_threads) {
 }
 
 // Initialize backends: load all available (CUDA, Metal, Vulkan...),
-// pick the best one, keep CPU as fallback.
+// prefer CUDA, then Vulkan, then CPU, with explicit fallback between them.
 // label: log prefix, e.g. "DiT", "VAE", "LM"
 // Subsequent calls reuse the same backend (single VMM pool). Returns a
 // BackendPair with .backend == NULL when initialisation fails; the caller
@@ -97,7 +97,17 @@ static BackendPair backend_init(const char * label) {
             return BackendPair{};
         }
     } else {
-        bp.backend = ggml_backend_init_best();
+        // Explicit fallback chain: CUDA -> Vulkan -> CPU.
+        // This avoids getting stuck when the best GPU backend's DLL registered
+        // but device initialization fails due to missing driver/runtime DLLs.
+        const char * fallback_chain[] = { "CUDA0", "Vulkan0", "CPU" };
+        for (const char * name : fallback_chain) {
+            bp.backend = ggml_backend_init_by_name(name, nullptr);
+            if (bp.backend) {
+                break;
+            }
+            qt_log(QT_LOG_INFO, "[Load] %s %s backend unavailable, trying fallback...", label, name);
+        }
     }
     if (!bp.backend) {
         qt_log(QT_LOG_ERROR, "[Load] no backend available");

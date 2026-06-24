@@ -158,20 +158,35 @@ add_executable(quantize tools/quantize.cpp)
 link_ggml_backends(quantize)
 
 # qwen-codec : standalone codec CLI (codes <-> WAV via 12Hz tokenizer)
-add_executable(qwen-codec tools/qwen-codec.cpp)
-target_link_libraries(qwen-codec PRIVATE qwen-core)
-link_ggml_backends(qwen-codec)
+#add_executable(qwen-codec tools/qwen-codec.cpp)
+#target_link_libraries(qwen-codec PRIVATE qwen-core)
+#link_ggml_backends(qwen-codec)
 
 # qwen-tts : full TTS pipeline (Talker LM + 12Hz tokenizer decoder).
-add_executable(qwen-tts tools/qwen-tts.cpp)
-target_link_libraries(qwen-tts PRIVATE qwen-core)
-link_ggml_backends(qwen-tts)
+#add_executable(qwen-tts tools/qwen-tts.cpp)
+#target_link_libraries(qwen-tts PRIVATE qwen-core)
+#link_ggml_backends(qwen-tts)
 
 # tts-server : OpenAI-compatible HTTP server over the TTS pipeline.
 # Always built : it is part of the project, not an optional add-on.
 add_executable(tts-server tools/tts-server.cpp)
 target_link_libraries(tts-server PRIVATE qwen-core httplib yyjson)
 link_ggml_backends(tts-server)
+
+# tts-webui : WebUI HTTP server (single-page HTML frontend + REST API).
+add_executable(tts-webui tools/tts-webui.cpp)
+target_link_libraries(tts-webui PRIVATE qwen-core httplib yyjson)
+link_ggml_backends(tts-webui)
+
+# download-models : CLI tool to download Qwen3-TTS GGUF models from
+# HuggingFace / ModelScope. Uses the system curl executable so no extra
+# C++ HTTP library dependency is needed.
+add_executable(download-models tools/download_models.cpp)
+target_include_directories(download-models PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+)
+add_dependencies(download-models version)
 
 # test-abi-c : pure C99 smoke test that locks in the public ABI contract.
 # Compiles qwen.h with a C compiler under -Wall -Werror -pedantic and
