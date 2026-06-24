@@ -19,13 +19,13 @@ jobs:
         include:
           - os: windows-2022
             vs-version: "17"
-            cuda-version: "12"
+            cuda-version: "12.9"
             cuda-installer: "cuda_12.9.0_windows.exe"
             cuda-url: "https://developer.download.nvidia.com/compute/cuda/12.9.0/local_installers/cuda_12.9.0_576.02_windows.exe"
           - os: windows-2025
             vs-version: "18"
-            cuda-version: "13"
-            cuda-installer: "cuda_13.0.0_windows.exe"
+            cuda-version: "13.3"
+            cuda-installer: "cuda_13.3.0_windows.exe"
             cuda-url: "https://developer.download.nvidia.com/compute/cuda/13.3.0/local_installers/cuda_13.3.0_windows.exe"
 
     steps:
@@ -46,17 +46,14 @@ jobs:
         shell: cmd
         run: |
           curl -L -o "${{ matrix.cuda-installer }}" "${{ matrix.cuda-url }}"
-          
-          :: 修复 start 命令陷阱：添加空标题 ""，并仅使用 -s 确保纯静默安装，防止 GUI 弹出
           start /wait "" "${{ matrix.cuda-installer }}" -s
-          
           del "${{ matrix.cuda-installer }}"
           
-          :: 注入环境变量
-          echo CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ matrix.cuda-version }}.0>> "%GITHUB_ENV%"
-          echo CUDA_PATH_V${{ matrix.cuda-version }}_0=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ matrix.cuda-version }}.0>> "%GITHUB_ENV%"
-          echo C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ matrix.cuda-version }}.0\bin>> "%GITHUB_PATH%"
-          echo C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ matrix.cuda-version }}.0\libnvvp>> "%GITHUB_PATH%"
+          :: 使用正斜杠防止转义问题，并使用精确的小版本号 (如 v12.9)
+          echo CUDA_PATH=C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${{ matrix.cuda-version }}>> "%GITHUB_ENV%"
+          echo CUDA_PATH_V${{ matrix.cuda-version }}=C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${{ matrix.cuda-version }}>> "%GITHUB_ENV%"
+          echo C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${{ matrix.cuda-version }}/bin>> "%GITHUB_PATH%"
+          echo C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${{ matrix.cuda-version }}/libnvvp>> "%GITHUB_PATH%"
 
       - name: Configure CMake
         shell: cmd
@@ -64,7 +61,8 @@ jobs:
           if exist build rmdir /s /q build
           mkdir build
           cd build
-          cmake .. -A x64 -DGGML_CPU_ALL_VARIANTS=ON -DGGML_CUDA=ON -DGGML_VULKAN=ON -DGGML_BACKEND_DL=ON
+          :: 显式指定 CUDAToolkit_ROOT 确保 CMake 能直接找到 nvcc
+          cmake .. -A x64 -DCUDAToolkit_ROOT="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${{ matrix.cuda-version }}" -DGGML_CPU_ALL_VARIANTS=ON -DGGML_CUDA=ON -DGGML_VULKAN=ON -DGGML_BACKEND_DL=ON
 
       - name: Build Release
         shell: cmd
