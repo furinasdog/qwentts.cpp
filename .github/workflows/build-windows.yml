@@ -9,23 +9,21 @@ on:
 permissions:
   contents: write
 
-# 可选：如需临时使用 Node 20，取消下方注释
-# env:
-#   ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
-
 jobs:
   build-windows:
     name: Build Windows (VC${{ matrix.vs-version }} + CUDA ${{ matrix.cuda-version }} + Vulkan)
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - vs-version: "17"
+          - os: windows-2022
+            vs-version: "17"
             cuda-version: "12"
             cuda-installer: "cuda_12.9.0_windows.exe"
             cuda-url: "https://developer.download.nvidia.com/compute/cuda/12.9.0/local_installers/cuda_12.9.0_windows.exe"
-          - vs-version: "18"
+          - os: windows-2025
+            vs-version: "18"
             cuda-version: "13"
             cuda-installer: "cuda_13.0.0_windows.exe"
             cuda-url: "https://developer.download.nvidia.com/compute/cuda/13.0.0/local_installers/cuda_13.0.0_windows.exe"
@@ -35,11 +33,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-
-      - name: Setup MSVC
-        uses: ilammy/msvc-dev-cmd@v2
-        # 移除 toolset 参数，自动加载运行器预装的最新 Visual Studio 环境
-        # CMake 将根据项目配置选择合适工具集
 
       - name: Install Vulkan SDK
         uses: jakoch/install-vulkan-sdk-action@v1
@@ -66,7 +59,7 @@ jobs:
           if exist build rmdir /s /q build
           mkdir build
           cd build
-          cmake .. -DGGML_CPU_ALL_VARIANTS=ON -DGGML_CUDA=ON -DGGML_VULKAN=ON -DGGML_BACKEND_DL=ON
+          cmake .. -A x64 -DGGML_CPU_ALL_VARIANTS=ON -DGGML_CUDA=ON -DGGML_VULKAN=ON -DGGML_BACKEND_DL=ON
 
       - name: Build Release
         shell: cmd
