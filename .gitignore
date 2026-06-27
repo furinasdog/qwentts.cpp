@@ -1,6 +1,4 @@
-```
-# CI/CD
-.github/
+test_output/
 
 # Dependencies
 node_modules/

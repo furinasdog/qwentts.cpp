@@ -24,6 +24,7 @@ serves text-to-speech synthesis over a REST API.
 | `--host <ip>` | No | `127.0.0.1` | Listen address |
 | `--port <n>` | No | `8080` | Listen port |
 | `--lang <name>` | No | `auto` | Language label |
+| `--cache-dir <dir>` | No | `qwentts_server_cache` | Reference audio cache directory (for zero-shot caching) |
 | `--no-fa` | No | — | Disable flash attention |
 | `--clamp-fp16` | No | — | Clamp hidden states to FP16 range |
 | `--help`, `-h` | No | — | Print usage and exit |
@@ -60,10 +61,13 @@ Content-Type: application/json
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `input` | string | Yes | — | Text to speak. Must be non-empty. |
-| `voice` | string | No | `""` | Speaker name. Maps to a loaded speaker when the model contains embedded speakers. Ignored when the model has none. |
-| `instructions` | string | No | `""` | Voice style instructions (e.g. tone, emotion). Maps to the instruct field in the ABI. |
+| `voice` | string | No | `""` | Speaker name. Maps to a loaded speaker when the model contains embedded speakers. Ignored when the model has none. Also ignored in zero-shot cloning mode. |
+| `instructions` | string | No | `""` | Voice style instructions (e.g. tone, emotion). Maps to the instruct field in the ABI. Ignored in zero-shot cloning mode. |
 | `response_format` | string | No | `"pcm"` | Output format. `"pcm"` for streaming s16le audio, `"wav"` for a one-shot RIFF WAV file. |
 | `speed` | number | No | `1.0` | Speed multiplier. Parsed for compatibility but currently ignored (no time-stretch in the ABI). |
+| `ref_wav_b64` | string | No | `""` | Base64-encoded reference WAV for zero-shot voice cloning (base model only). Mutually exclusive with `ref_wav_path`. Requires `ref_text`. |
+| `ref_wav_path` | string | No | `""` | Absolute file path to reference WAV for zero-shot voice cloning (base model only). Mutually exclusive with `ref_wav_b64`. Requires `ref_text`. |
+| `ref_text` | string | No | `""` | Transcript of the reference audio. Required when `ref_wav_b64` or `ref_wav_path` is provided. |
 
 #### Response
 
@@ -96,6 +100,24 @@ finishes.
 | Sample rate | 24000 Hz |
 | Channels | mono |
 
+#### Zero-shot Voice Cloning Constraints
+
+When `ref_wav_b64` or `ref_wav_path` is provided:
+
+1. **Model requirement**: Only base models support zero-shot cloning. Custom voice and voice design models return HTTP 400.
+2. **Mutual exclusions**:
+   - `voice` parameter is ignored (speaker selection not supported in zero-shot mode)
+   - `instructions` parameter is ignored (voice design not supported in zero-shot mode)
+3. **Transcript requirement**: `ref_text` must be provided and non-empty
+4. **Reference format**:
+   - `ref_wav_b64`: Mono or stereo WAV in any sample rate (will be resampled to 24 kHz)
+   - `ref_wav_path`: File accessible from the server's working directory (absolute path required)
+5. **Exclusive modes**: Cannot use `voice`, `ref_wav_b64`, and `ref_wav_path` simultaneously
+6. **Caching**: Reference audio encodings are cached by SHA256 hash in `--cache-dir` to accelerate repeated requests
+
+**Mode A (x-vector only)**: Provide `ref_wav_b64`/`ref_wav_path` without pre-encoded codes
+**Mode B (ICL)**: Provide `ref_wav_b64`/`ref_wav_path` with `ref_text` for in-context learning
+
 #### Errors
 
 Returns a JSON error envelope with the appropriate HTTP status code.
@@ -113,6 +135,11 @@ Returns a JSON error envelope with the appropriate HTTP status code.
 |---|---|
 | 400 | `input` missing or empty |
 | 400 | `response_format` is not `"pcm"` or `"wav"` |
+| 400 | `ref_wav_b64` and `ref_wav_path` both provided |
+| 400 | `ref_wav_b64` or `ref_wav_path` without `ref_text` |
+| 400 | Invalid Base64 in `ref_wav_b64` |
+| 400 | Reference WAV format invalid or corrupted |
+| 400 | Model does not support zero-shot cloning (use base model) |
 | 400 | Invalid request JSON |
 | 400 | Invalid parameters or mode (ABI status -1 or -2) |
 | 502 | Synthesis failed (server-side / GPU error) |
@@ -151,6 +178,73 @@ curl -s -X POST "http://127.0.0.1:8080/v1/audio/speech" \
     --output out.wav
 ```
 
+**Zero-shot voice cloning with Base64 reference (Mode B: ICL):**
+
+```bash
+curl -s -X POST "http://127.0.0.1:8080/v1/audio/speech" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "input": "I am very happy to see you.",
+      "ref_wav_b64": "'$(base64 -w 0 ./examples/freeman.wav)'",
+      "ref_text": "Reference speaker: Freeman, a cheerful character.",
+      "response_format": "wav"
+    }' \
+    --output cloned.wav
+```
+
+**Zero-shot voice cloning with absolute file path (Mode B: ICL):**
+
+```bash
+curl -s -X POST "http://127.0.0.1:8080/v1/audio/speech" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "input": "Synthesize in the cloned voice.",
+      "ref_wav_path": "/absolute/path/to/speaker_reference.wav",
+      "ref_text": "This is the reference speaker transcript.",
+      "response_format": "wav"
+    }' \
+    --output cloned.wav
+```
+
+**Python with zero-shot cloning:**
+
+```python
+import requests
+import base64
+
+# Base64 mode
+with open("ref.wav", "rb") as f:
+    ref_b64 = base64.b64encode(f.read()).decode('utf-8')
+
+resp = requests.post(
+    "http://127.0.0.1:8080/v1/audio/speech",
+    json={
+        "input": "Synthesize this text in the reference voice.",
+        "ref_wav_b64": ref_b64,
+        "ref_text": "Reference speaker transcript goes here.",
+        "response_format": "wav"
+    }
+)
+with open("cloned.wav", "wb") as f:
+    f.write(resp.content)
+
+# File path mode
+resp = requests.post(
+    "http://127.0.0.1:8080/v1/audio/speech",
+    json={
+        "input": "Another zero-shot synthesis.",
+        "ref_wav_path": "/absolute/path/to/reference.wav",
+        "ref_text": "Transcript of the reference audio.",
+        "response_format": "wav"
+    }
+)
+with open("cloned2.wav", "wb") as f:
+    f.write(resp.content)
+```
+
+**Performance note**: Reference audio encodings are automatically cached by SHA256 hash. Repeated requests with the same reference audio will retrieve pre-encoded embeddings from cache (`--cache-dir`), avoiding re-encoding and accelerating synthesis.
+
+
 **Python (requests):**
 
 ```python
@@ -177,6 +271,103 @@ response = client.audio.speech.create(
     response_format="wav",
 )
 response.stream_to_file("out.wav")
+```
+
+---
+
+### POST /v1/audio/encode
+
+Pre-encode a reference audio into speaker embedding and RVQ codes. The
+encoding is cached by content hash — repeated calls with the same audio
+return the cached result instantly without re-encoding.
+
+Use this endpoint to pre-encode a reference audio once, then subsequent
+`/v1/audio/speech` requests with the same audio will automatically hit
+the cache and skip encoding.
+
+#### Request
+
+```
+POST /v1/audio/encode
+Content-Type: application/json
+```
+
+**Body (JSON)**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `ref_wav_b64` | string | Yes* | Base64-encoded reference WAV. Mutually exclusive with `ref_wav_path`. |
+| `ref_wav_path` | string | Yes* | Absolute file path to reference WAV. Mutually exclusive with `ref_wav_b64`. |
+| `ref_text` | string | Yes | Transcript of the reference audio. Saved alongside the cached encoding. |
+
+\* Exactly one of `ref_wav_b64` or `ref_wav_path` must be provided.
+
+#### Response
+
+```json
+{
+  "hash": "a1b2c3d4e5f6...",
+  "ref_text": "Reference speaker transcript.",
+  "spk": "<base64 speaker embedding>",
+  "rvq": "<base64 RVQ codes>",
+  "cached": false
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `hash` | string | Content hash of the reference audio, used as cache key. |
+| `ref_text` | string | The reference transcript provided in the request. |
+| `spk` | string | Base64-encoded speaker embedding (float32 vector). |
+| `rvq` | string | Base64-encoded RVQ codebook. Binary layout: `[K:int32][ref_T:int32][codes:int32[]]`. |
+| `cached` | boolean | `true` if served from cache, `false` if freshly encoded. |
+
+#### Cache behavior
+
+- **Directory**: `qwentts_server_cache/` (configurable via `--cache-dir`)
+- **Files**: `{hash}.spk` (speaker embedding), `{hash}.rvq` (RVQ codes), `{hash}.txt` (reference text)
+- **Hit**: Returns pre-encoded data without GPU computation
+- **Miss**: Encodes the audio, saves to cache, returns the result
+
+#### Errors
+
+| Status | Condition |
+|---|---|
+| 400 | Neither `ref_wav_b64` nor `ref_wav_path` provided |
+| 400 | Both `ref_wav_b64` and `ref_wav_path` provided |
+| 400 | `ref_text` missing or empty |
+| 400 | Invalid Base64 or corrupted WAV |
+| 501 | Backend does not support encoding (non-base model) |
+| 502 | Encoding failed (GPU error) |
+
+#### Example
+
+**Encode reference audio (bash):**
+
+```bash
+curl -s -X POST "http://127.0.0.1:8080/v1/audio/encode" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "ref_wav_b64": "'$(base64 -w 0 ./asset/ref.wav)'",
+      "ref_text": "Reference speaker transcript."
+    }'
+```
+
+**Encode reference audio (Python):**
+
+```python
+import requests, base64
+
+with open("ref.wav", "rb") as f:
+    ref_b64 = base64.b64encode(f.read()).decode()
+
+resp = requests.post(
+    "http://127.0.0.1:8080/v1/audio/encode",
+    json={"ref_wav_b64": ref_b64, "ref_text": "Reference transcript."}
+)
+result = resp.json()
+print(f"Hash: {result['hash']}")
+print(f"Cached: {result['cached']}")
 ```
 
 ---
